@@ -1,4 +1,3 @@
-// C Program to design a shell in Linux
 #include<stdio.h>
 #include<string.h>
 #include<stdlib.h>
@@ -20,12 +19,12 @@ void init_shell()
     clear();
     printf("\n\n\n\n******************"
         "************************");
-    printf("\n\n\n\t****Shell****");
+    printf("\n\n\n\t****The Shell to End all Shells****");
     printf("\n\n\t-hope I don't break anything-");
     printf("\n\n\n\n*******************"
         "***********************");
     char* username = getenv("USER");
-    printf("\n\n\nUSER is: @%s", username);
+    printf("\n\n\nThe Supreme Ruler is: @%s", username);
     printf("\n");
     sleep(1);
     clear();
