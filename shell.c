@@ -51,7 +51,7 @@ void init_shell()
     char* username = getenv("USER");
     printf("\n\n\nThe Supreme Ruler is: @%s", username);
     printf("\n");
-    sleep(1);
+    sleep(3);
     clear();
 }
   
@@ -155,9 +155,15 @@ void execArgsPiped(char** parsed, char** parsedpipe)
 }
 
 // Change directory builtin
-void movetodir(char** dir)
+void movetodir(char* parsed, char* currentdir)
 {
-	
+	if (chdir(parsed) == -1)
+    {
+        printf("Is not directory\n");
+        return;
+    }
+	else
+		printf("Is directory\n");
 }
 
 // Help command builtin
@@ -216,7 +222,7 @@ int ownCmdHandler(char** parsed, char* currentdir)
             username);
         return 1;
 	case 5:
-		//movetodir(parsed[1]);
+		movetodir(parsed[1], currentdir);
 		return 1;
 	case 6:
 		printf("%s", currentdir);
