@@ -12,7 +12,28 @@
   
 // Clearing the shell using escape sequences
 #define clear() printf("\033[H\033[J")
-  
+
+// TODO List
+//
+// # movetodir directory  
+//		do not use chdir()
+//
+// # whereami
+//
+// # history[-c]
+//
+// # byebye
+//
+// # replay number
+//
+// # start program [parameters]
+//
+// # background program [parameters]
+//
+// # dalek PID
+//
+// Extra credit...
+
 // Greeting shell during startup
 void init_shell()
 {
@@ -128,7 +149,13 @@ void execArgsPiped(char** parsed, char** parsedpipe)
         }
     }
 }
-  
+
+// Change directory builtin
+void movetodir(char** dir)
+{
+	
+}
+
 // Help command builtin
 void openHelp()
 {
@@ -157,6 +184,7 @@ int ownCmdHandler(char** parsed)
     ListOfOwnCmds[1] = "cd";
     ListOfOwnCmds[2] = "help";
     ListOfOwnCmds[3] = "hello";
+	ListOfOwnCmds[4] = "movetodir"
   
     for (i = 0; i < NoOfOwnCmds; i++) {
         if (strcmp(parsed[0], ListOfOwnCmds[i]) == 0) {
@@ -182,6 +210,9 @@ int ownCmdHandler(char** parsed)
             "\nUse help to know more..\n",
             username);
         return 1;
+	case 5:
+		movetodir(parsed[1])
+		return 1;
     default:
         break;
     }
