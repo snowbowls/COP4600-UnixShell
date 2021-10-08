@@ -6,12 +6,16 @@
 #include<sys/wait.h>
 #include<readline/readline.h>
 #include<readline/history.h>
-  
+
+
 #define MAXCOM 1000 // max number of letters to be supported
 #define MAXLIST 100 // max number of commands to be supported
   
 // Clearing the shell using escape sequences
 #define clear() printf("\033[H\033[J")
+
+// Using this for getcwd
+#define PATH_MAX 4096
 
 // TODO List
 //
@@ -174,9 +178,9 @@ void openHelp()
 }
   
 // Function to execute builtin commands
-int ownCmdHandler(char** parsed)
+int ownCmdHandler(char** parsed, char* currentdir)
 {
-    int NoOfOwnCmds = 4, i, switchOwnArg = 0;
+    int NoOfOwnCmds = 6, i, switchOwnArg = 0;
     char* ListOfOwnCmds[NoOfOwnCmds];
     char* username;
   
@@ -184,7 +188,8 @@ int ownCmdHandler(char** parsed)
     ListOfOwnCmds[1] = "cd";
     ListOfOwnCmds[2] = "help";
     ListOfOwnCmds[3] = "hello";
-	ListOfOwnCmds[4] = "movetodir"
+	ListOfOwnCmds[4] = "movetodir";
+	ListOfOwnCmds[5] = "whereami";
   
     for (i = 0; i < NoOfOwnCmds; i++) {
         if (strcmp(parsed[0], ListOfOwnCmds[i]) == 0) {
@@ -211,7 +216,10 @@ int ownCmdHandler(char** parsed)
             username);
         return 1;
 	case 5:
-		movetodir(parsed[1])
+		//movetodir(parsed[1]);
+		return 1;
+	case 6:
+		printf("%s", currentdir);
 		return 1;
     default:
         break;
@@ -252,9 +260,8 @@ void parseSpace(char* str, char** parsed)
     }
 }
   
-int processString(char* str, char** parsed, char** parsedpipe)
+int processString(char* str, char** parsed, char** parsedpipe, char* currentdir)
 {
-  
     char* strpiped[2];
     int piped = 0;
   
@@ -269,7 +276,7 @@ int processString(char* str, char** parsed, char** parsedpipe)
         parseSpace(str, parsed);
     }
   
-    if (ownCmdHandler(parsed))
+    if (ownCmdHandler(parsed, currentdir))
         return 0;
     else
         return 1 + piped;
@@ -279,18 +286,18 @@ int main()
 {
     char inputString[MAXCOM], *parsedArgs[MAXLIST];
     char* parsedArgsPiped[MAXLIST];
+	char cwd[PATH_MAX];
     int execFlag = 0;
     init_shell();
   
     while (1) {
-        // print shell line
-        printDir();
         // take input
         if (takeInput(inputString))
             continue;
         // process
         execFlag = processString(inputString,
-        parsedArgs, parsedArgsPiped);
+        parsedArgs, parsedArgsPiped,
+		getcwd(cwd, sizeof(cwd)));
         // execflag returns zero if there is no command
         // or it is a builtin command,
         // 1 if it is a simple command
