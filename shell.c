@@ -19,10 +19,10 @@
 
 // TODO List
 //
-// # movetodir directory  
+// # movetodir directory  (DONE)
 //		do not use chdir()
 //
-// # whereami
+// # whereami (DONE)
 //
 // # history[-c]
 //
@@ -37,6 +37,15 @@
 // # dalek PID
 //
 // Extra credit...
+
+
+typedef struct Shell
+{
+	char cmdHist[MAXLIST][1024];
+	char currentdir[PATH_MAX]; // Current directory path
+	
+	int cnt;
+} Shell;
 
 // Greeting shell during startup
 void init_shell()
@@ -155,15 +164,18 @@ void execArgsPiped(char** parsed, char** parsedpipe)
 }
 
 // Change directory builtin
-void movetodir(char* parsed, char* currentdir)
+void movetodir(char* parsed, Shell* shelly)
 {
+	char dir[1024];
+	
 	if (chdir(parsed) == -1)
         printf("	Not a directory\n");
 	else
 	{
 		
-		printf("    Changed directory: %s\n", parsed);
-		strcpy(currentdir, parsed);
+		getcwd(dir, sizeof(dir));
+		printf("    Changed directory: %s\n", dir);
+		strcpy(shelly->currentdir, dir);
 	}
 	
 	return;
@@ -188,13 +200,13 @@ void openHelp()
 }
   
 // Function to execute builtin commands
-int ownCmdHandler(char** parsed, char* currentdir)
+int ownCmdHandler(char** parsed, Shell* shelly)
 {
     int NoOfOwnCmds = 6, i, switchOwnArg = 0;
     char* ListOfOwnCmds[NoOfOwnCmds];
     char* username;
   
-    ListOfOwnCmds[0] = "exit";
+    ListOfOwnCmds[0] = "byebye";
     ListOfOwnCmds[1] = "cd";
     ListOfOwnCmds[2] = "help";
     ListOfOwnCmds[3] = "hello";
@@ -211,6 +223,8 @@ int ownCmdHandler(char** parsed, char* currentdir)
     switch (switchOwnArg) {
     case 1:
         printf("\nGoodbye\n");
+		// SAVE COMMAND HISTORY
+		free(shelly);
         exit(0);
     case 2:
         chdir(parsed[1]);
@@ -226,10 +240,10 @@ int ownCmdHandler(char** parsed, char* currentdir)
             username);
         return 1;
 	case 5:
-		movetodir(parsed[1], currentdir);
+		movetodir(parsed[1], shelly);
 		return 1;
 	case 6:
-		printf("%s", currentdir);
+		printf("	%s", shelly->currentdir);
 		return 1;
     default:
         break;
@@ -270,7 +284,7 @@ void parseSpace(char* str, char** parsed)
     }
 }
   
-int processString(char* str, char** parsed, char** parsedpipe, char* currentdir)
+int processString(char* str, char** parsed, char** parsedpipe, Shell* shelly)
 {
     char* strpiped[2];
     int piped = 0;
@@ -286,7 +300,7 @@ int processString(char* str, char** parsed, char** parsedpipe, char* currentdir)
         parseSpace(str, parsed);
     }
   
-    if (ownCmdHandler(parsed, currentdir))
+    if (ownCmdHandler(parsed, shelly))
         return 0;
     else
         return 1 + piped;
@@ -296,18 +310,21 @@ int main()
 {
     char inputString[MAXCOM], *parsedArgs[MAXLIST];
     char* parsedArgsPiped[MAXLIST];
-	char cwd[PATH_MAX];
     int execFlag = 0;
     init_shell();
   
+	// Initializing struct
+	Shell *shelly;
+	shelly = calloc(1, sizeof(Shell));
+    getcwd(shelly->currentdir, sizeof(shelly->currentdir));
+	
     while (1) {
         // take input
         if (takeInput(inputString))
             continue;
         // process
         execFlag = processString(inputString,
-        parsedArgs, parsedArgsPiped,
-		getcwd(cwd, sizeof(cwd)));
+        parsedArgs, parsedArgsPiped, shelly);
         // execflag returns zero if there is no command
         // or it is a builtin command,
         // 1 if it is a simple command
