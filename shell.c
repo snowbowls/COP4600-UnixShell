@@ -44,7 +44,7 @@ typedef struct Shell
 	char cmdHist[MAXLIST][1024];
 	char currentdir[PATH_MAX]; // Current directory path
 	
-	int cnt;
+	int cmdCnt;
 } Shell;
 
 // Greeting shell during startup
@@ -60,7 +60,7 @@ void init_shell()
     char* username = getenv("USER");
     printf("\n\n\nThe Supreme Ruler is: @%s", username);
     printf("\n");
-    sleep(3);
+    sleep(1);
     clear();
 }
   
@@ -77,14 +77,6 @@ int takeInput(char* str)
     } else {
         return 1;
     }
-}
-  
-// Function to print Current Directory.
-void printDir()
-{
-    char cwd[1024];
-    getcwd(cwd, sizeof(cwd));
-    printf("\nDir: %s", cwd);
 }
   
 // Function where the system command is executed
@@ -182,19 +174,51 @@ void movetodir(char* parsed, Shell* shelly)
 		
 }
 
-// Help command builtin
+void cmdHistory(char* parsed, Shell* shelly)
+{
+	int i, j = 0;
+
+    // Clears command history
+    if (parsed != NULL && !strcmp(parsed, "-c"))
+    {
+        for (i = 0; i < shelly->cmdCnt; i++)
+            strcpy(shelly->cmdHist[i], "");
+
+        strcpy(shelly->cmdHist[0], "history -c");
+        strcpy(parsed, "");
+        shelly->cmdCnt = 1;
+
+        return;
+    }
+    // Prints command history
+    else
+    {
+        for (i = shelly->cmdCnt - 1; i > 0; i--)
+            printf("[%d]:   %s\n", j++, shelly->cmdHist[i]);
+
+        return;
+    }
+}
+
+void byebye(Shell* shelly)
+{
+	printf("\nGoodbye\n");
+	FILE *file = fopen("hist.txt", "w");
+	int results;
+	for (int i = shelly->cmdCnt - 1; i > 0; i--)
+	{
+            results = fputs(shelly->cmdHist[i], file);
+			results = fputs("\n",file);
+	}
+	fclose(file);
+	free(shelly);
+    exit(0);
+}
+
+// Help command
 void openHelp()
 {
-    puts("\n***WELCOME TO MY SHELL HELP***"
-        "\nCopyright @ Suprotik Dey"
-        "\n-Use the shell at your own risk..."
-        "\nList of Commands supported:"
-        "\n>cd"
-        "\n>ls"
-        "\n>exit"
-        "\n>all other general commands available in UNIX shell"
-        "\n>pipe handling"
-        "\n>improper space handling");
+    puts("REEEEEEEEEEEEE");
   
     return;
 }
@@ -202,7 +226,7 @@ void openHelp()
 // Function to execute builtin commands
 int ownCmdHandler(char** parsed, Shell* shelly)
 {
-    int NoOfOwnCmds = 6, i, switchOwnArg = 0;
+    int NoOfOwnCmds = 7, i, switchOwnArg = 0;
     char* ListOfOwnCmds[NoOfOwnCmds];
     char* username;
   
@@ -212,6 +236,9 @@ int ownCmdHandler(char** parsed, Shell* shelly)
     ListOfOwnCmds[3] = "hello";
 	ListOfOwnCmds[4] = "movetodir";
 	ListOfOwnCmds[5] = "whereami";
+	ListOfOwnCmds[6] = "history";
+	
+	strcpy(shelly->cmdHist[shelly->cmdCnt++], parsed[0]);
   
     for (i = 0; i < NoOfOwnCmds; i++) {
         if (strcmp(parsed[0], ListOfOwnCmds[i]) == 0) {
@@ -222,10 +249,7 @@ int ownCmdHandler(char** parsed, Shell* shelly)
   
     switch (switchOwnArg) {
     case 1:
-        printf("\nGoodbye\n");
-		// SAVE COMMAND HISTORY
-		free(shelly);
-        exit(0);
+        byebye(shelly);
     case 2:
         chdir(parsed[1]);
         return 1;
@@ -244,6 +268,9 @@ int ownCmdHandler(char** parsed, Shell* shelly)
 		return 1;
 	case 6:
 		printf("	%s", shelly->currentdir);
+		return 1;
+	case 7:
+		cmdHistory(parsed[1], shelly);
 		return 1;
     default:
         break;
@@ -317,6 +344,7 @@ int main()
 	Shell *shelly;
 	shelly = calloc(1, sizeof(Shell));
     getcwd(shelly->currentdir, sizeof(shelly->currentdir));
+	shelly->cmdCnt = 0;
 	
     while (1) {
         // take input
