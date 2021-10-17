@@ -158,12 +158,16 @@ void execArgsPiped(char** parsed, char** parsedpipe)
 void movetodir(char* parsed, char* currentdir)
 {
 	if (chdir(parsed) == -1)
-    {
-        printf("Is not directory\n");
-        return;
-    }
+        printf("	Not a directory\n");
 	else
-		printf("Is directory\n");
+	{
+		
+		printf("    Changed directory: %s\n", parsed);
+		strcpy(currentdir, parsed);
+	}
+	
+	return;
+		
 }
 
 // Help command builtin
