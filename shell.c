@@ -252,6 +252,29 @@ void cmdHistory(char* parsed, Shell* shelly)
     }
 }
 
+char** replay(char* parsed, Shell* shelly)
+{
+	char** newParse;
+	
+	int histcnt = ((int) *(parsed) - 46); // Don't ask, no clue why it's needed
+	int parsedint = ((int) *(parsed) - 48);
+	printf("Replaying command [%d]:   %s\n", parsedint , shelly->cmdHist[shelly->cmdCnt - histcnt]);
+	
+	char *string;
+	char *found;
+	int i = 0;
+
+    string = strdup(shelly->cmdHist[shelly->cmdCnt - histcnt]);
+	
+	printf("%s\n", string);
+	newParse[0] = strsep(&string, " ");
+	printf("%s\n", string);
+	newParse[1] = strsep(&string, " ");
+	
+	fflush(stdout);
+	return newParse;
+}
+
 void byebye(Shell* shelly)
 {
 	printf("\nGoodbye\n");
@@ -272,7 +295,14 @@ void byebye(Shell* shelly)
 // Help command
 void openHelp()
 {
-    puts("REEEEEEEEEEEEE");
+    printf("(1)	'movetodir [directory]' 		Changes direcory. No need for '/' before folder name\n");
+	printf("(2)	'whereami' 				Prints current directory\n");
+	printf("(3)	'history [-c]' 				Prints history or clears history if '-c' is present\n");
+	printf("(4)	'byebye' 				Terminates Shell\n");
+	printf("(5)	'replay [number]' 			Re-executes the command labeled with number in the history\n");
+	printf("(6)	'start program [parameters]' \n");
+	printf("(7)	'background program [parameters]' \n");
+	printf("(8)	'dalek PID' \n");
   
     return;
 }
@@ -284,9 +314,10 @@ int ownCmdHandler(char** parsed, Shell* shelly)
     char* ListOfOwnCmds[NoOfOwnCmds];
     char* username;
 	char* cmdLine;
+	char** replayParse;
 	
     ListOfOwnCmds[0] = "byebye";
-    ListOfOwnCmds[1] = "cd";
+    ListOfOwnCmds[1] = "replay";
     ListOfOwnCmds[2] = "help";
     ListOfOwnCmds[3] = "hello";
 	ListOfOwnCmds[4] = "movetodir";
@@ -304,8 +335,13 @@ int ownCmdHandler(char** parsed, Shell* shelly)
     case 1:
         byebye(shelly);
     case 2:
-        chdir(parsed[1]);
-        return 1;
+        replayParse = replay(parsed[1], shelly);
+		
+		//printf("\n%s", replayParse[0]);
+		//printf("\n%s", replayParse[1]);
+		fflush(stdout);
+		return 1;
+        //return ownCmdHandler(replayParse, shelly);
     case 3:
         openHelp();
         return 1;
