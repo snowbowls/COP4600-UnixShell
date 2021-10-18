@@ -7,6 +7,8 @@
 #include<readline/readline.h>
 #include<readline/history.h>
 
+#include <dirent.h>
+#include <errno.h>
 
 #define MAXCOM 1000 // max number of letters to be supported
 #define MAXLIST 100 // max number of commands to be supported
@@ -24,9 +26,9 @@
 //
 // # whereami (DONE)
 //
-// # history[-c]
+// # history[-c] (DONE)
 //
-// # byebye
+// # byebye (DONE)
 //
 // # replay number
 //
@@ -43,6 +45,7 @@ typedef struct Shell
 {
 	char cmdHist[MAXLIST][1024];
 	char currentdir[PATH_MAX]; // Current directory path
+	char mainDir[PATH_MAX];
 	
 	int cmdCnt;
 } Shell;
@@ -62,21 +65,6 @@ void init_shell()
     printf("\n");
     sleep(1);
     clear();
-}
-  
-// Function to take input
-int takeInput(char* str)
-{
-    char* buf;
-  
-    buf = readline("\n>>> ");
-    if (strlen(buf) != 0) {
-        add_history(buf);
-        strcpy(str, buf);
-        return 0;
-    } else {
-        return 1;
-    }
 }
   
 // Function where the system command is executed
@@ -158,17 +146,51 @@ void execArgsPiped(char** parsed, char** parsedpipe)
 // Change directory builtin
 void movetodir(char* parsed, Shell* shelly)
 {
-	char dir[1024];
+	struct dirent *dp;
+	char parsedDir[100] = "/";
+	char newDir[100];
+	DIR* dir;
 	
-	if (chdir(parsed) == -1)
-        printf("	Not a directory\n");
-	else
+	// If navigate up
+	if (!strcmp(parsed,".."))
 	{
-		
-		getcwd(dir, sizeof(dir));
-		printf("    Changed directory: %s\n", dir);
-		strcpy(shelly->currentdir, dir);
+			strcpy(newDir, shelly->currentdir);
+			int removeLen = 0;
+			for (int i = strlen(shelly->currentdir); i > 0; i--)
+			{
+				if (newDir[i] == '/')
+					break;
+				
+				removeLen++;
+			}
+			newDir[strlen(shelly->currentdir)-removeLen] = '\0';
+			dir = opendir(newDir);
 	}
+	// If navigate down
+	else {
+		strcpy(newDir, shelly->currentdir);
+		strcat(parsedDir, parsed);
+		strcat(newDir, parsedDir);
+		dir = opendir(newDir);
+	}
+	
+	
+	if (dir) {
+		// Directory Exists
+		dp = readdir(dir);
+		
+		strcpy(shelly->currentdir, newDir);
+		printf("    changed directory: %s\n", shelly->currentdir);
+		
+		closedir(dir);
+	} else if (ENOENT == errno) {
+		// Directory does not exist.
+		printf("	Does not exist");
+	} else {
+		// opendir() failed for some other reason.
+		printf("	What");
+	}
+
 	
 	return;
 		
@@ -229,7 +251,8 @@ int ownCmdHandler(char** parsed, Shell* shelly)
     int NoOfOwnCmds = 7, i, switchOwnArg = 0;
     char* ListOfOwnCmds[NoOfOwnCmds];
     char* username;
-  
+	char* cmdLine;
+	
     ListOfOwnCmds[0] = "byebye";
     ListOfOwnCmds[1] = "cd";
     ListOfOwnCmds[2] = "help";
@@ -237,8 +260,6 @@ int ownCmdHandler(char** parsed, Shell* shelly)
 	ListOfOwnCmds[4] = "movetodir";
 	ListOfOwnCmds[5] = "whereami";
 	ListOfOwnCmds[6] = "history";
-	
-	strcpy(shelly->cmdHist[shelly->cmdCnt++], parsed[0]);
   
     for (i = 0; i < NoOfOwnCmds; i++) {
         if (strcmp(parsed[0], ListOfOwnCmds[i]) == 0) {
@@ -264,7 +285,9 @@ int ownCmdHandler(char** parsed, Shell* shelly)
             username);
         return 1;
 	case 5:
-		movetodir(parsed[1], shelly);
+		if (parsed[1] != NULL)
+			movetodir(parsed[1], shelly);
+		else printf("Need path");
 		return 1;
 	case 6:
 		printf("	%s", shelly->currentdir);
@@ -332,7 +355,22 @@ int processString(char* str, char** parsed, char** parsedpipe, Shell* shelly)
     else
         return 1 + piped;
 }
+
+// Function to take input
+int takeInput(char* str, Shell* shelly)
+{
+    char* buf;
   
+    buf = readline("\n>>> ");
+    if (strlen(buf) != 0) {
+        strcpy(shelly->cmdHist[shelly->cmdCnt++], buf);
+        strcpy(str, buf);
+        return 0;
+    } else {
+        return 1;
+    }
+}
+
 int main()
 {
     char inputString[MAXCOM], *parsedArgs[MAXLIST];
@@ -344,11 +382,12 @@ int main()
 	Shell *shelly;
 	shelly = calloc(1, sizeof(Shell));
     getcwd(shelly->currentdir, sizeof(shelly->currentdir));
-	shelly->cmdCnt = 0;
+	getcwd(shelly->mainDir, sizeof(shelly->mainDir));
+	shelly->cmdCnt = 1;
 	
     while (1) {
         // take input
-        if (takeInput(inputString))
+        if (takeInput(inputString, shelly))
             continue;
         // process
         execFlag = processString(inputString,
