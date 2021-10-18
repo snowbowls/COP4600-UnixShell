@@ -51,9 +51,39 @@ typedef struct Shell
 } Shell;
 
 // Greeting shell during startup
-void init_shell()
+void init_shell(Shell* shelly)
 {
-    clear();
+	clear();
+	
+	// Read history file
+    char c;
+	char str[100];
+	char cmdHistTemp[MAXLIST][1024];
+	int cnt = 0;
+	int i = 0;
+	FILE *file;
+	file = fopen("hist", "rt");
+	if (file) {
+		while ((c=fgetc(file)) != EOF)
+		{
+			//shelly->cmdHist[1] = c;
+			if (c != '\n')
+				str[i++] = c;
+			else
+			{
+				strcpy(cmdHistTemp[cnt++], str);
+				memset(str, 0, sizeof(str));
+				i=0;
+			}
+		}
+		fclose(file);
+	}
+	while (cnt!=-1)
+	{
+		strcpy(shelly->cmdHist[shelly->cmdCnt++],cmdHistTemp[cnt--]);
+	}
+	
+	
     printf("\n\n\n\n******************"
         "************************");
     printf("\n\n\n\t****The Shell to End all Shells****");
@@ -64,7 +94,7 @@ void init_shell()
     printf("\n\n\nThe Supreme Ruler is: @%s", username);
     printf("\n");
     sleep(1);
-    clear();
+    //clear();
 }
   
 // Function where the system command is executed
@@ -215,7 +245,7 @@ void cmdHistory(char* parsed, Shell* shelly)
     // Prints command history
     else
     {
-        for (i = shelly->cmdCnt - 1; i > 0; i--)
+        for (i = shelly->cmdCnt - 1; i != 0; i--)
             printf("[%d]:   %s\n", j++, shelly->cmdHist[i]);
 
         return;
@@ -225,7 +255,9 @@ void cmdHistory(char* parsed, Shell* shelly)
 void byebye(Shell* shelly)
 {
 	printf("\nGoodbye\n");
-	FILE *file = fopen("hist.txt", "w");
+	char* filename = shelly->mainDir;
+	strcat(filename, "/hist");
+	FILE *file = fopen(filename, "w");
 	int results;
 	for (int i = shelly->cmdCnt - 1; i > 0; i--)
 	{
@@ -376,14 +408,17 @@ int main()
     char inputString[MAXCOM], *parsedArgs[MAXLIST];
     char* parsedArgsPiped[MAXLIST];
     int execFlag = 0;
-    init_shell();
-  
+	
 	// Initializing struct
 	Shell *shelly;
 	shelly = calloc(1, sizeof(Shell));
     getcwd(shelly->currentdir, sizeof(shelly->currentdir));
 	getcwd(shelly->mainDir, sizeof(shelly->mainDir));
-	shelly->cmdCnt = 1;
+	shelly->cmdCnt = 0;
+	
+	// Starter function
+    init_shell(shelly);
+	
 	
     while (1) {
         // take input
