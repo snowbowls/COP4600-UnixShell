@@ -20,6 +20,7 @@
 #define ARG_MAX_LEN 4096
 #define ARG_MAX 64
 #define MAX_BG_JOBS 64
+#define NUM_BUILTIN_CMDS 8
 
 #define IS_WHITESPACE(c) (c == ' ' || c == '\t')
 // Any control, operator, or pipeline char is treated as an arg string
@@ -50,7 +51,7 @@
 //
 // Extra credit...
 
-
+typedef int (*CmdFunc)(char **argv);
 
 typedef struct Process Process;
 struct Process 
@@ -58,6 +59,7 @@ struct Process
 	// Chained processes would result one piping to another -- feature to add
 	// later.
   Process *next;
+	CmdFunc func;
   int pid;
   char argv[ARG_MAX][ARG_MAX_LEN];
 };
@@ -81,13 +83,37 @@ typedef struct Shell
 	Job *bgjobs[MAX_BG_JOBS];
 } Shell;
 
-typedef void (*CmdFunc)(char **argv);
+typedef struct BuiltinCmd {
+	char *cmd_name;
+	CmdFunc func;
+} BuiltinCmd;
 
-enum ParseStatus {PARSE_OK=0, PARSE_INVALID_CHAR=1};
+enum ParseStatus {PARSE_OK=0, PARSE_INVALID_CHAR=1, PARSE_INVALID_CMD=2};
 
 void init_job(Job *j);
 void init_process(Process *p);
 int parse(Job *j, char *cmd);
+
+int movetodir(char **argv);
+int whereami(char **argv);
+int history(char **argv);
+int byebye(char **argv);
+int replay(char **argv);
+int start(char **argv);
+int background(char **argv);
+int dalek(char **argv);
+
+static const BuiltinCmd builtin_cmds[] = {
+	{"movetodir", movetodir},
+	{"whereami", whereami},
+	{"history", history},
+	{"byebye", byebye},
+	{"replay", replay},
+	{"start", start},
+	{"background", background},
+	{"dalek", dalek},
+	{NULL, NULL}
+};
 
 
 void init_job(Job *j)
@@ -106,6 +132,21 @@ void init_process(Process *p)
 	p->pid = 0;
 }
 
+CmdFunc parse_cmd(char *cmd_name)
+{
+	BuiltinCmd bi_cmd;		
+	int i = 0;
+
+	while ((bi_cmd = builtin_cmds[i]).cmd_name != NULL) {
+		if (strcmp(bi_cmd.cmd_name, cmd_name) == 0)
+			return bi_cmd.func;
+
+		i++;
+	}
+	
+	return NULL;
+}
+
 // cmd is a null or \n terminated string
 int parse(Job *j, char *cmd)
 {
@@ -115,6 +156,7 @@ int parse(Job *j, char *cmd)
 	int reached_end = 0;
 	char c;
 	int i;
+	Process *proc = j->first_process;
 	for (i = 0; i < ARG_MAX_LEN; i++) {
 		c = cmd[i];
 
@@ -125,8 +167,13 @@ int parse(Job *j, char *cmd)
 		if (IS_WHITESPACE(c) || reached_end) {
 			// Done parsing arg
 			if (parsing_arg) {
-				j->first_process->argv[arg][arg_len] = '\0';
-				printf("parsed argv: '%s'\n", j->first_process->argv[arg]);
+				proc->argv[arg][arg_len] = '\0';
+				printf("parsed argv: '%s'\n", proc->argv[arg]);
+
+				if (arg == 0) {
+					if ((proc->func = parse_cmd(proc->argv[0])) == NULL)
+						return PARSE_INVALID_CMD;
+				}
 				parsing_arg = 0;
 				arg_len = 0;
 				arg++;
@@ -137,7 +184,7 @@ int parse(Job *j, char *cmd)
 		}
 		else if (IS_ALLOWED(c)) {
 			parsing_arg = 1;
-			j->first_process->argv[arg][arg_len] = c;
+			proc->argv[arg][arg_len] = c;
 			arg_len++;
 		}
 		else {
@@ -273,57 +320,57 @@ void execArgsPiped(char** parsed, char** parsedpipe)
 }
 
 // Change directory builtin
-void movetodir(char* parsed, Shell* shelly)
-{
-  struct dirent *dp;
-  char parsedDir[100] = "/";
-  char newDir[100];
-  DIR* dir;
-  
-  // If navigate up
-  if (!strcmp(parsed,".."))
-  {
-      strcpy(newDir, shelly->currentdir);
-      int removeLen = 0;
-      for (int i = strlen(shelly->currentdir); i > 0; i--)
-      {
-        if (newDir[i] == '/')
-          break;
-        
-        removeLen++;
-      }
-      newDir[strlen(shelly->currentdir)-removeLen] = '\0';
-      dir = opendir(newDir);
-  }
-  // If navigate down
-  else {
-    strcpy(newDir, shelly->currentdir);
-    strcat(parsedDir, parsed);
-    strcat(newDir, parsedDir);
-    dir = opendir(newDir);
-  }
-  
-  
-  if (dir) {
-    // Directory Exists
-    dp = readdir(dir);
-    
-    strcpy(shelly->currentdir, newDir);
-    printf("    changed directory: %s\n", shelly->currentdir);
-    
-    closedir(dir);
-  } else if (ENOENT == errno) {
-    // Directory does not exist.
-    printf("  Does not exist");
-  } else {
-    // opendir() failed for some other reason.
-    printf("  What");
-  }
-
-  
-  return;
-    
-}
+// void movetodir(char* parsed, Shell* shelly)
+// {
+//   struct dirent *dp;
+//   char parsedDir[100] = "/";
+//   char newDir[100];
+//   DIR* dir;
+//   
+//   // If navigate up
+//   if (!strcmp(parsed,".."))
+//   {
+//       strcpy(newDir, shelly->currentdir);
+//       int removeLen = 0;
+//       for (int i = strlen(shelly->currentdir); i > 0; i--)
+//       {
+//         if (newDir[i] == '/')
+//           break;
+//         
+//         removeLen++;
+//       }
+//       newDir[strlen(shelly->currentdir)-removeLen] = '\0';
+//       dir = opendir(newDir);
+//   }
+//   // If navigate down
+//   else {
+//     strcpy(newDir, shelly->currentdir);
+//     strcat(parsedDir, parsed);
+//     strcat(newDir, parsedDir);
+//     dir = opendir(newDir);
+//   }
+//   
+//   
+//   if (dir) {
+//     // Directory Exists
+//     dp = readdir(dir);
+//     
+//     strcpy(shelly->currentdir, newDir);
+//     printf("    changed directory: %s\n", shelly->currentdir);
+//     
+//     closedir(dir);
+//   } else if (ENOENT == errno) {
+//     // Directory does not exist.
+//     printf("  Does not exist");
+//   } else {
+//     // opendir() failed for some other reason.
+//     printf("  What");
+//   }
+//
+//   
+//   return;
+//     
+// }
 
 void cmdHistory(char* parsed, Shell* shelly)
 {
@@ -351,45 +398,45 @@ void cmdHistory(char* parsed, Shell* shelly)
     }
 }
 
-char** replay(char* parsed, Shell* shelly)
-{
-  char** newParse;
-  
-  int histcnt = ((int) *(parsed) - 46); // Don't ask, no clue why it's needed
-  int parsedint = ((int) *(parsed) - 48);
-  printf("Replaying command [%d]:   %s\n", parsedint , shelly->cmdHist[shelly->cmdCnt - histcnt]);
-  
-  char *string;
-  char *found;
-  int i = 0;
+// char** replay(char* parsed, Shell* shelly)
+// {
+//   char** newParse;
+//   
+//   int histcnt = ((int) *(parsed) - 46); // Don't ask, no clue why it's needed
+//   int parsedint = ((int) *(parsed) - 48);
+//   printf("Replaying command [%d]:   %s\n", parsedint , shelly->cmdHist[shelly->cmdCnt - histcnt]);
+//   
+//   char *string;
+//   char *found;
+//   int i = 0;
+//
+//     string = strdup(shelly->cmdHist[shelly->cmdCnt - histcnt]);
+//   
+//   printf("%s\n", string);
+//   newParse[0] = strsep(&string, " ");
+//   printf("%s\n", string);
+//   newParse[1] = strsep(&string, " ");
+//   
+//   fflush(stdout);
+//   return newParse;
+// }
 
-    string = strdup(shelly->cmdHist[shelly->cmdCnt - histcnt]);
-  
-  printf("%s\n", string);
-  newParse[0] = strsep(&string, " ");
-  printf("%s\n", string);
-  newParse[1] = strsep(&string, " ");
-  
-  fflush(stdout);
-  return newParse;
-}
-
-void byebye(Shell* shelly)
-{
-  printf("\nGoodbye\n");
-  char* filename = shelly->mainDir;
-  strcat(filename, "/hist");
-  FILE *file = fopen(filename, "w");
-  int results;
-  for (int i = shelly->cmdCnt - 1; i > 0; i--)
-  {
-            results = fputs(shelly->cmdHist[i], file);
-      results = fputs("\n",file);
-  }
-  fclose(file);
-  free(shelly);
-    exit(0);
-}
+// void byebye(Shell* shelly)
+// {
+//   printf("\nGoodbye\n");
+//   char* filename = shelly->mainDir;
+//   strcat(filename, "/hist");
+//   FILE *file = fopen(filename, "w");
+//   int results;
+//   for (int i = shelly->cmdCnt - 1; i > 0; i--)
+//   {
+//             results = fputs(shelly->cmdHist[i], file);
+//       results = fputs("\n",file);
+//   }
+//   fclose(file);
+//   free(shelly);
+//     exit(0);
+// }
 
 // Help command
 void openHelp()
@@ -407,67 +454,67 @@ void openHelp()
 }
   
 // Function to execute builtin commands
-int ownCmdHandler(char** parsed, Shell* shelly)
-{
-	int NoOfOwnCmds = 7, i, switchOwnArg = 0;
-	char* ListOfOwnCmds[NoOfOwnCmds];
-	char* username;
-  char* cmdLine;
-  char** replayParse;
-  
-	ListOfOwnCmds[0] = "byebye";
-	ListOfOwnCmds[1] = "replay";
-	ListOfOwnCmds[2] = "help";
-	ListOfOwnCmds[3] = "hello";
-  ListOfOwnCmds[4] = "movetodir";
-  ListOfOwnCmds[5] = "whereami";
-  ListOfOwnCmds[6] = "history";
-  
-	for (i = 0; i < NoOfOwnCmds; i++) {
-		if (strcmp(parsed[0], ListOfOwnCmds[i]) == 0) {
-			switchOwnArg = i + 1;
-			break;
-		}
-	}
-  
-	switch (switchOwnArg) {
-	case 1:
-		byebye(shelly);
-	case 2:
-		replayParse = replay(parsed[1], shelly);
-	
-	//printf("\n%s", replayParse[0]);
-	//printf("\n%s", replayParse[1]);
-	fflush(stdout);
-	return 1;
-			//return ownCmdHandler(replayParse, shelly);
-	case 3:
-		openHelp();
-		return 1;
-	case 4:
-		username = getenv("USER");
-		printf("\nHello %s.\nMind that this is "
-				"not a place to play around."
-				"\nUse help to know more..\n",
-				username);
-		return 1;
-  case 5:
-    if (parsed[1] != NULL)
-      movetodir(parsed[1], shelly);
-    else printf("Need path");
-    return 1;
-  case 6:
-    printf("  %s", shelly->currentdir);
-    return 1;
-  case 7:
-    cmdHistory(parsed[1], shelly);
-    return 1;
-    default:
-        break;
-    }
-  
-    return 0;
-}
+// int ownCmdHandler(char** parsed, Shell* shelly)
+// {
+// 	int NoOfOwnCmds = 7, i, switchOwnArg = 0;
+// 	char* ListOfOwnCmds[NoOfOwnCmds];
+// 	char* username;
+//   char* cmdLine;
+//   char** replayParse;
+//   
+// 	ListOfOwnCmds[0] = "byebye";
+// 	ListOfOwnCmds[1] = "replay";
+// 	ListOfOwnCmds[2] = "help";
+// 	ListOfOwnCmds[3] = "hello";
+//   ListOfOwnCmds[4] = "movetodir";
+//   ListOfOwnCmds[5] = "whereami";
+//   ListOfOwnCmds[6] = "history";
+//   
+// 	for (i = 0; i < NoOfOwnCmds; i++) {
+// 		if (strcmp(parsed[0], ListOfOwnCmds[i]) == 0) {
+// 			switchOwnArg = i + 1;
+// 			break;
+// 		}
+// 	}
+//   
+// 	switch (switchOwnArg) {
+// 	case 1:
+// 		byebye(shelly);
+// 	case 2:
+// 		replayParse = replay(parsed[1], shelly);
+// 	
+// 	//printf("\n%s", replayParse[0]);
+// 	//printf("\n%s", replayParse[1]);
+// 	fflush(stdout);
+// 	return 1;
+// 			//return ownCmdHandler(replayParse, shelly);
+// 	case 3:
+// 		openHelp();
+// 		return 1;
+// 	case 4:
+// 		username = getenv("USER");
+// 		printf("\nHello %s.\nMind that this is "
+// 				"not a place to play around."
+// 				"\nUse help to know more..\n",
+// 				username);
+// 		return 1;
+//   case 5:
+//     if (parsed[1] != NULL)
+//       movetodir(parsed[1], shelly);
+//     else printf("Need path");
+//     return 1;
+//   case 6:
+//     printf("  %s", shelly->currentdir);
+//     return 1;
+//   case 7:
+//     cmdHistory(parsed[1], shelly);
+//     return 1;
+//     default:
+//         break;
+//     }
+//   
+//     return 0;
+// }
   
 // function for finding pipe
 int parsePipe(char* str, char** strpiped)
@@ -501,27 +548,27 @@ void parseSpace(char* str, char** parsed)
     }
 }
   
-int processString(char* str, char** parsed, char** parsedpipe, Shell* shelly)
-{
-    char* strpiped[2];
-    int piped = 0;
-  
-    piped = parsePipe(str, strpiped);
-  
-    if (piped) {
-        parseSpace(strpiped[0], parsed);
-        parseSpace(strpiped[1], parsedpipe);
-  
-    } else {
-  
-        parseSpace(str, parsed);
-    }
-  
-    if (ownCmdHandler(parsed, shelly))
-        return 0;
-    else
-        return 1 + piped;
-}
+// int processString(char* str, char** parsed, char** parsedpipe, Shell* shelly)
+// {
+//     char* strpiped[2];
+//     int piped = 0;
+//   
+//     piped = parsePipe(str, strpiped);
+//   
+//     if (piped) {
+//         parseSpace(strpiped[0], parsed);
+//         parseSpace(strpiped[1], parsedpipe);
+//   
+//     } else {
+//   
+//         parseSpace(str, parsed);
+//     }
+//   
+//     if (ownCmdHandler(parsed, shelly))
+//         return 0;
+//     else
+//         return 1 + piped;
+// }
 
 // Function to take input
 int takeInput(char* str, Shell* shelly)
@@ -538,6 +585,54 @@ int takeInput(char* str, Shell* shelly)
     }
 }
 
+int movetodir(char **argv)
+{
+	return 0;	
+}
+
+int whereami(char **argv)
+{
+	
+	return 0;	
+}
+
+int history(char **argv)
+{
+	
+	return 0;	
+}
+
+int byebye(char **argv)
+{
+	
+	return 0;	
+}
+
+int replay(char **argv)
+{
+	
+	return 0;	
+}
+
+int start(char **argv)
+{
+	
+	return 0;	
+}
+
+int background(char **argv)
+{
+	
+	printf("This is background!\n");
+	return 0;	
+}
+
+int dalek(char **argv)
+{
+	
+	return 0;	
+}
+
 int main()
 {
 	Job job;
@@ -545,7 +640,8 @@ int main()
 	init_job(&job);
 	init_process(&proc);
 	job.first_process = &proc;
-	parse(&job, "background sh -c suck my balls");
+	printf("returned: %d\n", parse(&job, "background sh -c suck my balls"));
+	proc.func(NULL);
 }
 
 // int main()
