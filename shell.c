@@ -91,7 +91,9 @@ typedef struct BuiltinCmd {
 enum ParseStatus {PARSE_OK=0, PARSE_INVALID_CHAR=1, PARSE_INVALID_CMD=2};
 
 void init_job(Job *j);
+void launch_job(Job *j);
 void init_process(Process *p);
+void launch_process(Process *p, int infile, int outfile, int errfile, int foreground);
 int parse(Job *j, char *cmd);
 
 int movetodir(char **argv);
@@ -194,6 +196,25 @@ int parse(Job *j, char *cmd)
 	j->cmd[i] = '\0';
 	
 	return PARSE_OK;
+}
+
+void launch_job(Job *j)
+{
+	// Not supporting pipes atm
+	Process *proc = j->first_process;	
+
+	int pid = fork();
+	if (pid < 0) {
+		// Error
+	}
+	if (pid == 0) {
+		// Child process
+		launch_process(proc, j->stdin, j->stdout, j->stderr, 1);
+	}
+	else {
+		// Parent process
+	}
+
 }
 
 // Greeting shell during startup
