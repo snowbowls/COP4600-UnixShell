@@ -17,12 +17,22 @@
 #define clear() printf("\033[H\033[J")
 
 // Using this for getcwd
-#define PATH_MAX 4096
+#define ARG_MAX_LEN 4096
+#define ARG_MAX 64
+#define MAX_BG_JOBS 64
+
+#define IS_WHITESPACE(c) (c == ' ' || c == '\t')
+// Any control, operator, or pipeline char is treated as an arg string
+#define IS_ALLOWED(c) (c > 32 && c < 127)
+// #define IS_CONTROL(c) ()
+// #define IS_PIPELINE(c) ()
+// #define IS_OPERATOR(c) ()
+// #define IS_UNSUPPORTED(c) ()
 
 // TODO List
 //
 // # movetodir directory  (DONE)
-//		do not use chdir()
+//    do not use chdir()
 //
 // # whereami (DONE)
 //
@@ -41,81 +51,170 @@
 // Extra credit...
 
 
+
+typedef struct Process Process;
+struct Process 
+{
+	// Chained processes would result one piping to another -- feature to add
+	// later.
+  Process *next;
+  int pid;
+  char argv[ARG_MAX][ARG_MAX_LEN];
+};
+
+typedef struct Job
+{
+  char cmd[ARG_MAX_LEN];
+  Process *first_process;
+  int stdin;
+  int stdout;
+  int stderr;
+} Job;
+
 typedef struct Shell
 {
-	char cmdHist[MAXLIST][1024];
-	char currentdir[PATH_MAX]; // Current directory path
-	char mainDir[PATH_MAX];
-	
-	int cmdCnt;
+  char cmdHist[MAXLIST][1024];
+  char currentdir[ARG_MAX_LEN]; // Current directory path
+  char mainDir[ARG_MAX_LEN];
+  
+  int cmdCnt;
+	Job *bgjobs[MAX_BG_JOBS];
 } Shell;
+
+typedef void (*CmdFunc)(char **argv);
+
+enum ParseStatus {PARSE_OK=0, PARSE_INVALID_CHAR=1};
+
+void init_job(Job *j);
+void init_process(Process *p);
+int parse(Job *j, char *cmd);
+
+
+void init_job(Job *j)
+{
+	// Just making sure that the string is empty
+	j->cmd[0] = '\0';	
+	j->first_process = NULL;
+	j->stdin = STDIN_FILENO;
+	j->stdout = STDOUT_FILENO;
+	j->stderr = STDERR_FILENO;
+}
+
+void init_process(Process *p)
+{
+	p->next = NULL;
+	p->pid = 0;
+}
+
+// cmd is a null or \n terminated string
+int parse(Job *j, char *cmd)
+{
+	int arg = 0;
+	int arg_len = 0;
+	int parsing_arg = 0;
+	int reached_end = 0;
+	char c;
+	int i;
+	for (i = 0; i < ARG_MAX_LEN; i++) {
+		c = cmd[i];
+
+		if (c == '\0' || c == '\n')	
+			reached_end = 1;	/* Need to finish parsing arg */
+		
+		j->cmd[i] = c;
+		if (IS_WHITESPACE(c) || reached_end) {
+			// Done parsing arg
+			if (parsing_arg) {
+				j->first_process->argv[arg][arg_len] = '\0';
+				printf("parsed argv: '%s'\n", j->first_process->argv[arg]);
+				parsing_arg = 0;
+				arg_len = 0;
+				arg++;
+			}	
+
+			if (reached_end)
+				break;
+		}
+		else if (IS_ALLOWED(c)) {
+			parsing_arg = 1;
+			j->first_process->argv[arg][arg_len] = c;
+			arg_len++;
+		}
+		else {
+			return PARSE_INVALID_CHAR;
+		}
+	}
+	j->cmd[i] = '\0';
+	
+	return PARSE_OK;
+}
 
 // Greeting shell during startup
 void init_shell(Shell* shelly)
 {
 	clear();
-	
-	// Read history file
-    char c;
-	char str[100];
-	char cmdHistTemp[MAXLIST][1024];
-	int cnt = 0;
-	int i = 0;
-	FILE *file;
-	file = fopen("hist", "rt");
-	if (file) {
-		while ((c=fgetc(file)) != EOF)
-		{
-			//shelly->cmdHist[1] = c;
-			if (c != '\n')
-				str[i++] = c;
-			else
-			{
-				strcpy(cmdHistTemp[cnt++], str);
-				memset(str, 0, sizeof(str));
-				i=0;
-			}
-		}
-		fclose(file);
-	}
-	while (cnt!=-1)
-	{
-		strcpy(shelly->cmdHist[shelly->cmdCnt++],cmdHistTemp[cnt--]);
-	}
-	
-	
-    printf("\n\n\n\n******************"
-        "************************");
-    printf("\n\n\n\t****The Shell to End all Shells****");
-    printf("\n\n\t-hope I don't break anything-");
-    printf("\n\n\n\n*******************"
-        "***********************");
-    char* username = getenv("USER");
-    printf("\n\n\nThe Supreme Ruler is: @%s", username);
-    printf("\n");
-    sleep(1);
-    //clear();
+  
+  // Read history file
+	char c;
+  char str[100];
+  char cmdHistTemp[MAXLIST][1024];
+  int cnt = 0;
+  int i = 0;
+  FILE *file;
+  file = fopen("hist", "rt");
+  if (file) {
+    while ((c=fgetc(file)) != EOF) {
+      //shelly->cmdHist[1] = c;
+      if (c != '\n')
+        str[i++] = c;
+      else
+      {
+        strcpy(cmdHistTemp[cnt++], str);
+        memset(str, 0, sizeof(str));
+        i=0;
+      }
+    }
+    fclose(file);
+  }
+  while (cnt!=-1) {
+    strcpy(shelly->cmdHist[shelly->cmdCnt++],cmdHistTemp[cnt--]);
+  }
+  
+  
+	printf("\n\n\n\n******************"
+			"************************");
+	printf("\n\n\n\t****The Shell to End all Shells****");
+	printf("\n\n\t-hope I don't break anything-");
+	printf("\n\n\n\n*******************"
+			"***********************");
+	char* username = getenv("USER");
+	printf("\n\n\nThe Supreme Ruler is: @%s", username);
+	printf("\n");
+	sleep(1);
+	//clear();
 }
   
 // Function where the system command is executed
 void execArgs(char** parsed)
 {
-    // Forking a child
-    pid_t pid = fork(); 
-  
-    if (pid == -1) {
-        printf("\nFailed forking child..");
-        return;
-    } else if (pid == 0) {
-        if (execvp(parsed[0], parsed) < 0) {
-            printf("\nCould not execute command..");
-        }
-        exit(0);
-    } else {
-        // waiting for child to terminate
-        wait(NULL); 
-        return;
-    }
+	// Forking a child
+	pid_t pid = fork(); 
+
+	if (pid == -1) {
+		printf("\nFailed forking child..");
+		return;
+	} 
+	else if (pid == 0) {
+		if (execvp(parsed[0], parsed) < 0) {
+				printf("\nCould not execute command..");
+		}
+		exit(0);
+	} 
+	else {
+		// waiting for child to terminate
+		wait(NULL); 
+		return;
+	}
 }
   
 // Function where the piped system commands is executed
@@ -176,59 +275,59 @@ void execArgsPiped(char** parsed, char** parsedpipe)
 // Change directory builtin
 void movetodir(char* parsed, Shell* shelly)
 {
-	struct dirent *dp;
-	char parsedDir[100] = "/";
-	char newDir[100];
-	DIR* dir;
-	
-	// If navigate up
-	if (!strcmp(parsed,".."))
-	{
-			strcpy(newDir, shelly->currentdir);
-			int removeLen = 0;
-			for (int i = strlen(shelly->currentdir); i > 0; i--)
-			{
-				if (newDir[i] == '/')
-					break;
-				
-				removeLen++;
-			}
-			newDir[strlen(shelly->currentdir)-removeLen] = '\0';
-			dir = opendir(newDir);
-	}
-	// If navigate down
-	else {
-		strcpy(newDir, shelly->currentdir);
-		strcat(parsedDir, parsed);
-		strcat(newDir, parsedDir);
-		dir = opendir(newDir);
-	}
-	
-	
-	if (dir) {
-		// Directory Exists
-		dp = readdir(dir);
-		
-		strcpy(shelly->currentdir, newDir);
-		printf("    changed directory: %s\n", shelly->currentdir);
-		
-		closedir(dir);
-	} else if (ENOENT == errno) {
-		// Directory does not exist.
-		printf("	Does not exist");
-	} else {
-		// opendir() failed for some other reason.
-		printf("	What");
-	}
+  struct dirent *dp;
+  char parsedDir[100] = "/";
+  char newDir[100];
+  DIR* dir;
+  
+  // If navigate up
+  if (!strcmp(parsed,".."))
+  {
+      strcpy(newDir, shelly->currentdir);
+      int removeLen = 0;
+      for (int i = strlen(shelly->currentdir); i > 0; i--)
+      {
+        if (newDir[i] == '/')
+          break;
+        
+        removeLen++;
+      }
+      newDir[strlen(shelly->currentdir)-removeLen] = '\0';
+      dir = opendir(newDir);
+  }
+  // If navigate down
+  else {
+    strcpy(newDir, shelly->currentdir);
+    strcat(parsedDir, parsed);
+    strcat(newDir, parsedDir);
+    dir = opendir(newDir);
+  }
+  
+  
+  if (dir) {
+    // Directory Exists
+    dp = readdir(dir);
+    
+    strcpy(shelly->currentdir, newDir);
+    printf("    changed directory: %s\n", shelly->currentdir);
+    
+    closedir(dir);
+  } else if (ENOENT == errno) {
+    // Directory does not exist.
+    printf("  Does not exist");
+  } else {
+    // opendir() failed for some other reason.
+    printf("  What");
+  }
 
-	
-	return;
-		
+  
+  return;
+    
 }
 
 void cmdHistory(char* parsed, Shell* shelly)
 {
-	int i, j = 0;
+  int i, j = 0;
 
     // Clears command history
     if (parsed != NULL && !strcmp(parsed, "-c"))
@@ -254,55 +353,55 @@ void cmdHistory(char* parsed, Shell* shelly)
 
 char** replay(char* parsed, Shell* shelly)
 {
-	char** newParse;
-	
-	int histcnt = ((int) *(parsed) - 46); // Don't ask, no clue why it's needed
-	int parsedint = ((int) *(parsed) - 48);
-	printf("Replaying command [%d]:   %s\n", parsedint , shelly->cmdHist[shelly->cmdCnt - histcnt]);
-	
-	char *string;
-	char *found;
-	int i = 0;
+  char** newParse;
+  
+  int histcnt = ((int) *(parsed) - 46); // Don't ask, no clue why it's needed
+  int parsedint = ((int) *(parsed) - 48);
+  printf("Replaying command [%d]:   %s\n", parsedint , shelly->cmdHist[shelly->cmdCnt - histcnt]);
+  
+  char *string;
+  char *found;
+  int i = 0;
 
     string = strdup(shelly->cmdHist[shelly->cmdCnt - histcnt]);
-	
-	printf("%s\n", string);
-	newParse[0] = strsep(&string, " ");
-	printf("%s\n", string);
-	newParse[1] = strsep(&string, " ");
-	
-	fflush(stdout);
-	return newParse;
+  
+  printf("%s\n", string);
+  newParse[0] = strsep(&string, " ");
+  printf("%s\n", string);
+  newParse[1] = strsep(&string, " ");
+  
+  fflush(stdout);
+  return newParse;
 }
 
 void byebye(Shell* shelly)
 {
-	printf("\nGoodbye\n");
-	char* filename = shelly->mainDir;
-	strcat(filename, "/hist");
-	FILE *file = fopen(filename, "w");
-	int results;
-	for (int i = shelly->cmdCnt - 1; i > 0; i--)
-	{
+  printf("\nGoodbye\n");
+  char* filename = shelly->mainDir;
+  strcat(filename, "/hist");
+  FILE *file = fopen(filename, "w");
+  int results;
+  for (int i = shelly->cmdCnt - 1; i > 0; i--)
+  {
             results = fputs(shelly->cmdHist[i], file);
-			results = fputs("\n",file);
-	}
-	fclose(file);
-	free(shelly);
+      results = fputs("\n",file);
+  }
+  fclose(file);
+  free(shelly);
     exit(0);
 }
 
 // Help command
 void openHelp()
 {
-    printf("(1)	'movetodir [directory]' 		Changes direcory. No need for '/' before folder name\n");
-	printf("(2)	'whereami' 				Prints current directory\n");
-	printf("(3)	'history [-c]' 				Prints history or clears history if '-c' is present\n");
-	printf("(4)	'byebye' 				Terminates Shell\n");
-	printf("(5)	'replay [number]' 			Re-executes the command labeled with number in the history\n");
-	printf("(6)	'start program [parameters]' \n");
-	printf("(7)	'background program [parameters]' \n");
-	printf("(8)	'dalek PID' \n");
+    printf("(1) 'movetodir [directory]'     Changes direcory. No need for '/' before folder name\n");
+  printf("(2) 'whereami'        Prints current directory\n");
+  printf("(3) 'history [-c]'        Prints history or clears history if '-c' is present\n");
+  printf("(4) 'byebye'        Terminates Shell\n");
+  printf("(5) 'replay [number]'       Re-executes the command labeled with number in the history\n");
+  printf("(6) 'start program [parameters]' \n");
+  printf("(7) 'background program [parameters]' \n");
+  printf("(8) 'dalek PID' \n");
   
     return;
 }
@@ -310,59 +409,59 @@ void openHelp()
 // Function to execute builtin commands
 int ownCmdHandler(char** parsed, Shell* shelly)
 {
-    int NoOfOwnCmds = 7, i, switchOwnArg = 0;
-    char* ListOfOwnCmds[NoOfOwnCmds];
-    char* username;
-	char* cmdLine;
-	char** replayParse;
+	int NoOfOwnCmds = 7, i, switchOwnArg = 0;
+	char* ListOfOwnCmds[NoOfOwnCmds];
+	char* username;
+  char* cmdLine;
+  char** replayParse;
+  
+	ListOfOwnCmds[0] = "byebye";
+	ListOfOwnCmds[1] = "replay";
+	ListOfOwnCmds[2] = "help";
+	ListOfOwnCmds[3] = "hello";
+  ListOfOwnCmds[4] = "movetodir";
+  ListOfOwnCmds[5] = "whereami";
+  ListOfOwnCmds[6] = "history";
+  
+	for (i = 0; i < NoOfOwnCmds; i++) {
+		if (strcmp(parsed[0], ListOfOwnCmds[i]) == 0) {
+			switchOwnArg = i + 1;
+			break;
+		}
+	}
+  
+	switch (switchOwnArg) {
+	case 1:
+		byebye(shelly);
+	case 2:
+		replayParse = replay(parsed[1], shelly);
 	
-    ListOfOwnCmds[0] = "byebye";
-    ListOfOwnCmds[1] = "replay";
-    ListOfOwnCmds[2] = "help";
-    ListOfOwnCmds[3] = "hello";
-	ListOfOwnCmds[4] = "movetodir";
-	ListOfOwnCmds[5] = "whereami";
-	ListOfOwnCmds[6] = "history";
-  
-    for (i = 0; i < NoOfOwnCmds; i++) {
-        if (strcmp(parsed[0], ListOfOwnCmds[i]) == 0) {
-            switchOwnArg = i + 1;
-            break;
-        }
-    }
-  
-    switch (switchOwnArg) {
-    case 1:
-        byebye(shelly);
-    case 2:
-        replayParse = replay(parsed[1], shelly);
-		
-		//printf("\n%s", replayParse[0]);
-		//printf("\n%s", replayParse[1]);
-		fflush(stdout);
+	//printf("\n%s", replayParse[0]);
+	//printf("\n%s", replayParse[1]);
+	fflush(stdout);
+	return 1;
+			//return ownCmdHandler(replayParse, shelly);
+	case 3:
+		openHelp();
 		return 1;
-        //return ownCmdHandler(replayParse, shelly);
-    case 3:
-        openHelp();
-        return 1;
-    case 4:
-        username = getenv("USER");
-        printf("\nHello %s.\nMind that this is "
-            "not a place to play around."
-            "\nUse help to know more..\n",
-            username);
-        return 1;
-	case 5:
-		if (parsed[1] != NULL)
-			movetodir(parsed[1], shelly);
-		else printf("Need path");
+	case 4:
+		username = getenv("USER");
+		printf("\nHello %s.\nMind that this is "
+				"not a place to play around."
+				"\nUse help to know more..\n",
+				username);
 		return 1;
-	case 6:
-		printf("	%s", shelly->currentdir);
-		return 1;
-	case 7:
-		cmdHistory(parsed[1], shelly);
-		return 1;
+  case 5:
+    if (parsed[1] != NULL)
+      movetodir(parsed[1], shelly);
+    else printf("Need path");
+    return 1;
+  case 6:
+    printf("  %s", shelly->currentdir);
+    return 1;
+  case 7:
+    cmdHistory(parsed[1], shelly);
+    return 1;
     default:
         break;
     }
@@ -441,39 +540,49 @@ int takeInput(char* str, Shell* shelly)
 
 int main()
 {
-    char inputString[MAXCOM], *parsedArgs[MAXLIST];
-    char* parsedArgsPiped[MAXLIST];
-    int execFlag = 0;
-	
-	// Initializing struct
-	Shell *shelly;
-	shelly = calloc(1, sizeof(Shell));
-    getcwd(shelly->currentdir, sizeof(shelly->currentdir));
-	getcwd(shelly->mainDir, sizeof(shelly->mainDir));
-	shelly->cmdCnt = 0;
-	
-	// Starter function
-    init_shell(shelly);
-	
-	
-    while (1) {
-        // take input
-        if (takeInput(inputString, shelly))
-            continue;
-        // process
-        execFlag = processString(inputString,
-        parsedArgs, parsedArgsPiped, shelly);
-        // execflag returns zero if there is no command
-        // or it is a builtin command,
-        // 1 if it is a simple command
-        // 2 if it is including a pipe.
-  
-        // execute
-        if (execFlag == 1)
-            execArgs(parsedArgs);
-  
-        if (execFlag == 2)
-            execArgsPiped(parsedArgs, parsedArgsPiped);
-    }
-    return 0;
+	Job job;
+	Process proc;
+	init_job(&job);
+	init_process(&proc);
+	job.first_process = &proc;
+	parse(&job, "background sh -c suck my balls");
 }
+
+// int main()
+// {
+//     char inputString[MAXCOM], *parsedArgs[MAXLIST];
+//     char* parsedArgsPiped[MAXLIST];
+//     int execFlag = 0;
+//   
+//   // Initializing struct
+//   Shell *shelly;
+//   shelly = calloc(1, sizeof(Shell));
+//     getcwd(shelly->currentdir, sizeof(shelly->currentdir));
+//   getcwd(shelly->mainDir, sizeof(shelly->mainDir));
+//   shelly->cmdCnt = 0;
+//   
+//   // Starter function
+//     init_shell(shelly);
+//   
+//   
+//     while (1) {
+//         // take input
+//         if (takeInput(inputString, shelly))
+//             continue;
+//         // process
+//         execFlag = processString(inputString,
+//         parsedArgs, parsedArgsPiped, shelly);
+//         // execflag returns zero if there is no command
+//         // or it is a builtin command,
+//         // 1 if it is a simple command
+//         // 2 if it is including a pipe.
+//   
+//         // execute
+//         if (execFlag == 1)
+//             execArgs(parsedArgs);
+//   
+//         if (execFlag == 2)
+//             execArgsPiped(parsedArgs, parsedArgsPiped);
+//     }
+//     return 0;
+// }
