@@ -1,11 +1,12 @@
-#include<stdio.h>
-#include<string.h>
-#include<stdlib.h>
-#include<unistd.h>
-#include<sys/types.h>
-#include<sys/wait.h>
-#include<readline/readline.h>
-#include<readline/history.h>
+#include <stdio.h>
+#include <ctype.h>
+#include <string.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <readline/readline.h>
+#include <readline/history.h>
 
 #include <dirent.h>
 #include <errno.h>
@@ -15,14 +16,16 @@
   
 // Clearing the shell using escape sequences
 #define clear() printf("\033[H\033[J")
+#define HIST_FILEPATH "$HOME/.shelly-history"
 
 // Using this for getcwd
-#define ARG_MAX_LEN 4096
+#define ARG_MAX_LEN 1024
 #define ARG_MAX 64
+#define CMD_MAX_LEN (ARG_MAX_LEN * ARG_MAX)
 #define MAX_BG_JOBS 64
 #define NUM_BUILTIN_CMDS 8
 
-#define IS_WHITESPACE(c) (c == ' ' || c == '\t')
+#define IS_WHITESPACE(c) (c == ' ' || c == '\t' || c == '\r' || c == '\n')
 // Any control, operator, or pipeline char is treated as an arg string
 #define IS_ALLOWED(c) (c > 32 && c < 127)
 // #define IS_CONTROL(c) ()
@@ -51,61 +54,48 @@
 //
 // Extra credit...
 
-typedef int (*CmdFunc)(char **argv);
+typedef struct Shell Shell;
 
-typedef struct Process Process;
-struct Process 
-{
-	// Chained processes would result one piping to another -- feature to add
-	// later.
-  Process *next;
-	CmdFunc func;
-  int pid;
-  char argv[ARG_MAX][ARG_MAX_LEN];
+typedef char CmdVargs[ARG_MAX][ARG_MAX_LEN];
+typedef int (*CmdFunc)(Shell*, CmdVargs);
+
+typedef struct CmdHist CmdHist;
+struct CmdHist {
+	CmdHist *next;
+	char cmd[CMD_MAX_LEN];
 };
 
-typedef struct Job
+struct Shell
 {
-  char cmd[ARG_MAX_LEN];
-  Process *first_process;
-  int stdin;
-  int stdout;
-  int stderr;
-} Job;
-
-typedef struct Shell
-{
-  char cmdHist[MAXLIST][1024];
-  char currentdir[ARG_MAX_LEN]; // Current directory path
+	CmdHist hist;
+	FILE *hist_file;
+  char cwd[ARG_MAX_LEN]; // Current directory path
   char mainDir[ARG_MAX_LEN];
   
-  int cmdCnt;
-	Job *bgjobs[MAX_BG_JOBS];
-} Shell;
+	int bgpids[MAX_BG_JOBS];
+	int num_bgpids;
+};
 
-typedef struct BuiltinCmd {
+typedef struct CmdDef {
 	char *cmd_name;
 	CmdFunc func;
-} BuiltinCmd;
+} CmdDef;
 
 enum ParseStatus {PARSE_OK=0, PARSE_INVALID_CHAR=1, PARSE_INVALID_CMD=2};
 
-void init_job(Job *j);
-void launch_job(Job *j);
-void init_process(Process *p);
-void launch_process(Process *p, int infile, int outfile, int errfile, int foreground);
-int parse(Job *j, char *cmd);
+int parse(CmdFunc *func, CmdVargs vargs, char *cmd);
+void add_to_hist(Shell *shelly, char *cmd);
 
-int movetodir(char **argv);
-int whereami(char **argv);
-int history(char **argv);
-int byebye(char **argv);
-int replay(char **argv);
-int start(char **argv);
-int background(char **argv);
-int dalek(char **argv);
+int movetodir(Shell *shelly, CmdVargs argv);
+int whereami(Shell *shelly, CmdVargs argv);
+int history(Shell *shelly, CmdVargs argv);
+int byebye(Shell *shelly, CmdVargs argv);
+int replay(Shell *shelly, CmdVargs argv);
+int start(Shell *shelly, CmdVargs argv);
+int background(Shell *shelly, CmdVargs argv);
+int dalek(Shell *shelly, CmdVargs argv);
 
-static const BuiltinCmd builtin_cmds[] = {
+static const CmdDef builtin_cmds[] = {
 	{"movetodir", movetodir},
 	{"whereami", whereami},
 	{"history", history},
@@ -117,26 +107,9 @@ static const BuiltinCmd builtin_cmds[] = {
 	{NULL, NULL}
 };
 
-
-void init_job(Job *j)
-{
-	// Just making sure that the string is empty
-	j->cmd[0] = '\0';	
-	j->first_process = NULL;
-	j->stdin = STDIN_FILENO;
-	j->stdout = STDOUT_FILENO;
-	j->stderr = STDERR_FILENO;
-}
-
-void init_process(Process *p)
-{
-	p->next = NULL;
-	p->pid = 0;
-}
-
 CmdFunc parse_cmd(char *cmd_name)
 {
-	BuiltinCmd bi_cmd;		
+	CmdDef bi_cmd;		
 	int i = 0;
 
 	while ((bi_cmd = builtin_cmds[i]).cmd_name != NULL) {
@@ -150,7 +123,7 @@ CmdFunc parse_cmd(char *cmd_name)
 }
 
 // cmd is a null or \n terminated string
-int parse(Job *j, char *cmd)
+int parse(CmdFunc *func, char vargs[ARG_MAX][ARG_MAX_LEN], char *cmd)
 {
 	int arg = 0;
 	int arg_len = 0;
@@ -158,23 +131,24 @@ int parse(Job *j, char *cmd)
 	int reached_end = 0;
 	char c;
 	int i;
-	Process *proc = j->first_process;
 	for (i = 0; i < ARG_MAX_LEN; i++) {
 		c = cmd[i];
 
 		if (c == '\0' || c == '\n')	
 			reached_end = 1;	/* Need to finish parsing arg */
 		
-		j->cmd[i] = c;
 		if (IS_WHITESPACE(c) || reached_end) {
 			// Done parsing arg
 			if (parsing_arg) {
-				proc->argv[arg][arg_len] = '\0';
-				printf("parsed argv: '%s'\n", proc->argv[arg]);
+				vargs[arg][arg_len] = '\0';
+				printf("parsed argv: '%s'\n", vargs[arg]);
 
 				if (arg == 0) {
-					if ((proc->func = parse_cmd(proc->argv[0])) == NULL)
+					CmdFunc cmd_func = parse_cmd(vargs[0]);
+					if (cmd_func == NULL)
 						return PARSE_INVALID_CMD;
+
+					*func = cmd_func;
 				}
 				parsing_arg = 0;
 				arg_len = 0;
@@ -186,81 +160,119 @@ int parse(Job *j, char *cmd)
 		}
 		else if (IS_ALLOWED(c)) {
 			parsing_arg = 1;
-			proc->argv[arg][arg_len] = c;
+			vargs[arg][arg_len] = c;
 			arg_len++;
 		}
 		else {
 			return PARSE_INVALID_CHAR;
 		}
 	}
-	j->cmd[i] = '\0';
 	
 	return PARSE_OK;
 }
 
-void launch_job(Job *j)
+void env_find_replace(char *dest, char *str)
 {
-	// Not supporting pipes atm
-	Process *proc = j->first_process;	
+	int front = 0;
+	int back = 0;
+	char key[ARG_MAX_LEN];
+	char *val;
+	char c = str[0];
+	int in_key = 0;
 
-	int pid = fork();
-	if (pid < 0) {
-		// Error
-	}
-	if (pid == 0) {
-		// Child process
-		launch_process(proc, j->stdin, j->stdout, j->stderr, 1);
-	}
-	else {
-		// Parent process
+	while (c != '\0' && back < ARG_MAX_LEN) {
+		if (c == '$')	{
+			in_key = 1;
+			back++;
+			front++;
+			c = str[front];
+		}
+		else if (in_key) {
+			if (isalpha(c) || c == '_') {
+				front++;
+				c = str[front];
+			}
+			else {
+				// check env
+				memcpy((void*) key, (void*) (str + back), front - back);
+				key[front - back] = '\0';
+				// printf("key:'%s', strlen=%d\n", key, strlen(key));
+				val = getenv(key);
+				// printf("val:'%s'\n", val);
+				if (val) {
+					while (*val != '\0') {
+						*dest = *val;
+						val++;
+						dest++;
+					}
+					back = front;
+				}
+				else {
+					for (; back <= front; back++) {
+						*dest = str[back];
+					}
+				}
+
+				in_key = 0;
+			}
+		}
+		else {
+			*dest = c;
+			dest++;
+			front++;
+			back++;
+			c = str[front];
+		}
+
+		// printf("front=%d, back=%d\n", front, back);
 	}
 
+	*dest = '\0';
 }
-
 // Greeting shell during startup
-void init_shell(Shell* shelly)
-{
-	clear();
-  
-  // Read history file
-	char c;
-  char str[100];
-  char cmdHistTemp[MAXLIST][1024];
-  int cnt = 0;
-  int i = 0;
-  FILE *file;
-  file = fopen("hist", "rt");
-  if (file) {
-    while ((c=fgetc(file)) != EOF) {
-      //shelly->cmdHist[1] = c;
-      if (c != '\n')
-        str[i++] = c;
-      else
-      {
-        strcpy(cmdHistTemp[cnt++], str);
-        memset(str, 0, sizeof(str));
-        i=0;
-      }
-    }
-    fclose(file);
-  }
-  while (cnt!=-1) {
-    strcpy(shelly->cmdHist[shelly->cmdCnt++],cmdHistTemp[cnt--]);
-  }
-  
-  
-	printf("\n\n\n\n******************"
-			"************************");
-	printf("\n\n\n\t****The Shell to End all Shells****");
-	printf("\n\n\t-hope I don't break anything-");
-	printf("\n\n\n\n*******************"
-			"***********************");
-	char* username = getenv("USER");
-	printf("\n\n\nThe Supreme Ruler is: @%s", username);
-	printf("\n");
-	sleep(1);
-	//clear();
-}
+// void init_shell(Shell* shelly)
+// {
+// 	clear();
+//   
+//   // Read history file
+// 	char c;
+//   char str[100];
+//   char cmdHistTemp[MAXLIST][1024];
+//   int cnt = 0;
+//   int i = 0;
+//   FILE *file;
+//   file = fopen("hist", "rt");
+//   if (file) {
+//     while ((c=fgetc(file)) != EOF) {
+//       //shelly->cmdHist[1] = c;
+//       if (c != '\n')
+//         str[i++] = c;
+//       else
+//       {
+//         strcpy(cmdHistTemp[cnt++], str);
+//         memset(str, 0, sizeof(str));
+//         i=0;
+//       }
+//     }
+//     fclose(file);
+//   }
+//   while (cnt!=-1) {
+//     strcpy(shelly->cmdHist[shelly->cmdCnt++],cmdHistTemp[cnt--]);
+//   }
+//   
+//   
+// 	printf("\n\n\n\n******************"
+// 			"************************");
+// 	printf("\n\n\n\t****The Shell to End all Shells****");
+// 	printf("\n\n\t-hope I don't break anything-");
+// 	printf("\n\n\n\n*******************"
+// 			"***********************");
+// 	char* username = getenv("USER");
+// 	printf("\n\n\nThe Supreme Ruler is: @%s", username);
+// 	printf("\n");
+// 	sleep(1);
+// 	//clear();
+// }
   
 // Function where the system command is executed
 void execArgs(char** parsed)
@@ -351,21 +363,21 @@ void execArgsPiped(char** parsed, char** parsedpipe)
 //   // If navigate up
 //   if (!strcmp(parsed,".."))
 //   {
-//       strcpy(newDir, shelly->currentdir);
+//       strcpy(newDir, shelly->cwd);
 //       int removeLen = 0;
-//       for (int i = strlen(shelly->currentdir); i > 0; i--)
+//       for (int i = strlen(shelly->cwd); i > 0; i--)
 //       {
 //         if (newDir[i] == '/')
 //           break;
 //         
 //         removeLen++;
 //       }
-//       newDir[strlen(shelly->currentdir)-removeLen] = '\0';
+//       newDir[strlen(shelly->cwd)-removeLen] = '\0';
 //       dir = opendir(newDir);
 //   }
 //   // If navigate down
 //   else {
-//     strcpy(newDir, shelly->currentdir);
+//     strcpy(newDir, shelly->cwd);
 //     strcat(parsedDir, parsed);
 //     strcat(newDir, parsedDir);
 //     dir = opendir(newDir);
@@ -376,8 +388,8 @@ void execArgsPiped(char** parsed, char** parsedpipe)
 //     // Directory Exists
 //     dp = readdir(dir);
 //     
-//     strcpy(shelly->currentdir, newDir);
-//     printf("    changed directory: %s\n", shelly->currentdir);
+//     strcpy(shelly->cwd, newDir);
+//     printf("    changed directory: %s\n", shelly->cwd);
 //     
 //     closedir(dir);
 //   } else if (ENOENT == errno) {
@@ -393,31 +405,31 @@ void execArgsPiped(char** parsed, char** parsedpipe)
 //     
 // }
 
-void cmdHistory(char* parsed, Shell* shelly)
-{
-  int i, j = 0;
-
-    // Clears command history
-    if (parsed != NULL && !strcmp(parsed, "-c"))
-    {
-        for (i = 0; i < shelly->cmdCnt; i++)
-            strcpy(shelly->cmdHist[i], "");
-
-        strcpy(shelly->cmdHist[0], "history -c");
-        strcpy(parsed, "");
-        shelly->cmdCnt = 1;
-
-        return;
-    }
-    // Prints command history
-    else
-    {
-        for (i = shelly->cmdCnt - 1; i != 0; i--)
-            printf("[%d]:   %s\n", j++, shelly->cmdHist[i]);
-
-        return;
-    }
-}
+// void cmdHistory(char* parsed, Shell* shelly)
+// {
+//   int i, j = 0;
+//
+//     // Clears command history
+//     if (parsed != NULL && !strcmp(parsed, "-c"))
+//     {
+//         for (i = 0; i < shelly->cmdCnt; i++)
+//             strcpy(shelly->cmdHist[i], "");
+//
+//         strcpy(shelly->cmdHist[0], "history -c");
+//         strcpy(parsed, "");
+//         shelly->cmdCnt = 1;
+//
+//         return;
+//     }
+//     // Prints command history
+//     else
+//     {
+//         for (i = shelly->cmdCnt - 1; i != 0; i--)
+//             printf("[%d]:   %s\n", j++, shelly->cmdHist[i]);
+//
+//         return;
+//     }
+// }
 
 // char** replay(char* parsed, Shell* shelly)
 // {
@@ -525,7 +537,7 @@ void openHelp()
 //     else printf("Need path");
 //     return 1;
 //   case 6:
-//     printf("  %s", shelly->currentdir);
+//     printf("  %s", shelly->cwd);
 //     return 1;
 //   case 7:
 //     cmdHistory(parsed[1], shelly);
@@ -591,64 +603,69 @@ void parseSpace(char* str, char** parsed)
 //         return 1 + piped;
 // }
 
+// void add_to_hist(Shell *shelly, char *cmd)
+// {
+// 	s
+// }
+
 // Function to take input
-int takeInput(char* str, Shell* shelly)
+// int takeInput(char* str, Shell* shelly)
+// {
+//     char* buf;
+//  
+//     buf = readline("\n>>> ");
+//     if (strlen(buf) != 0) {
+// 			
+// 			strcpy(shelly->cmdHist[shelly->cmdCnt++], buf);
+// 			strcpy(str, buf);
+// 			return 0;
+//     } else {
+//         return 1;
+//     }
+// }
+
+int start(Shell *shell, CmdVargs argv)
 {
-    char* buf;
-  
-    buf = readline("\n>>> ");
-    if (strlen(buf) != 0) {
-        strcpy(shelly->cmdHist[shelly->cmdCnt++], buf);
-        strcpy(str, buf);
-        return 0;
-    } else {
-        return 1;
-    }
+	
+	return 0;
 }
 
-int movetodir(char **argv)
+int background(Shell *shell, CmdVargs argv)
+{
+	
+	return 0;
+}
+
+int dalek(Shell *shell, CmdVargs argv)
+{
+	
+	return 0;
+}
+
+int movetodir(Shell *shell, CmdVargs argv)
 {
 	return 0;	
 }
 
-int whereami(char **argv)
+int whereami(Shell *shell, CmdVargs argv)
 {
 	
 	return 0;	
 }
 
-int history(char **argv)
+int history(Shell *shell, CmdVargs argv)
 {
 	
 	return 0;	
 }
 
-int byebye(char **argv)
+int byebye(Shell *shell, CmdVargs argv)
 {
 	
 	return 0;	
 }
 
-int replay(char **argv)
-{
-	
-	return 0;	
-}
-
-int start(char **argv)
-{
-	
-	return 0;	
-}
-
-int background(char **argv)
-{
-	
-	printf("This is background!\n");
-	return 0;	
-}
-
-int dalek(char **argv)
+int replay(Shell *shell, CmdVargs argv)
 {
 	
 	return 0;	
@@ -656,13 +673,18 @@ int dalek(char **argv)
 
 int main()
 {
-	Job job;
-	Process proc;
-	init_job(&job);
-	init_process(&proc);
-	job.first_process = &proc;
-	printf("returned: %d\n", parse(&job, "background sh -c suck my balls"));
-	proc.func(NULL);
+	Shell shelly;
+
+	CmdFunc func;
+	CmdVargs vargs;
+	printf("returned: %d\n", parse(&func, vargs, "background sh -c suck my balls"));
+	func(&shelly, vargs);
+	// proc.func(NULL);
+	
+	char test[ARG_MAX_LEN];
+	printf("%s\n", HIST_FILEPATH);
+	env_find_replace(test, HIST_FILEPATH);
+	printf("%s\n", test);
 }
 
 // int main()
@@ -674,7 +696,7 @@ int main()
 //   // Initializing struct
 //   Shell *shelly;
 //   shelly = calloc(1, sizeof(Shell));
-//     getcwd(shelly->currentdir, sizeof(shelly->currentdir));
+//     getcwd(shelly->cwd, sizeof(shelly->cwd));
 //   getcwd(shelly->mainDir, sizeof(shelly->mainDir));
 //   shelly->cmdCnt = 0;
 //   
