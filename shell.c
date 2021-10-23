@@ -265,19 +265,19 @@ const char* get_random_greeting() {
 }
 
 void init_shell(Shell *shelly) {
-	char *hist_filepath = (char *) malloc(sizeof(char) * PATH_MAX);
+	char *hist_filepath = (char *) malloc(sizeof(char) * ARG_MAX_LEN);
 	FILE *hist_file;
 
 	env_find_replace(hist_filepath, HIST_FILEPATH);
   shelly->hist_filepath = hist_filepath;
   shelly->hist = NULL;
+	printf("%s\n", hist_filepath);
   hist_file = fopen(hist_filepath, "r");
 	if (hist_file) {
 		read_hist_file(shelly, hist_file);
     fclose(hist_file);
 	}
 
-  fclose(hist_file);
 	shelly->cwd = getcwd(NULL, 0);
 }
 
