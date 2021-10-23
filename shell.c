@@ -68,10 +68,10 @@ struct CmdHist {
 
 struct Shell
 {
-	CmdHist hist;
+	CmdHist *hist;
 	FILE *hist_file;
   char cwd[ARG_MAX_LEN]; // Current directory path
-  char mainDir[ARG_MAX_LEN];
+  // char mainDir[ARG_MAX_LEN];
   
 	int bgpids[MAX_BG_JOBS];
 	int num_bgpids;
@@ -86,6 +86,7 @@ enum ParseStatus {PARSE_OK=0, PARSE_INVALID_CHAR=1, PARSE_INVALID_CMD=2};
 
 int parse(CmdFunc *func, CmdVargs vargs, char *cmd);
 void add_to_hist(Shell *shelly, char *cmd);
+void read_hist_file(Shell *shelly);
 
 int movetodir(Shell *shelly, CmdVargs argv);
 int whereami(Shell *shelly, CmdVargs argv);
@@ -255,8 +256,22 @@ const char* get_random_greeting() {
 	return greetings[rand() % len];	
 }
 
-void init_shell(Shell *shell) {
-	
+void init_shell(Shell *shelly) {
+	char hist_filepath[CMD_MAX_LEN];
+	FILE *hist_file;
+
+	env_find_replace(hist_filepath, HIST_FILEPATH);
+	hist_file = fopen(hist_filepath, "a+");
+	if (hist_file) {
+		shelly->hist_file = hist_file;	
+		read_hist_file(shelly);
+	}
+	else {
+		shelly->hist = NULL;
+		shelly->hist_file = NULL;
+	}
+	// fseek(hist_file, 0, SEEK_SET);
+	getcwd(shelly->cwd, CMD_MAX_LEN);
 }
 
 // Greeting shell during startup
@@ -502,8 +517,49 @@ void openHelp()
 //     return 0;
 // }
 
+// Must be null terminated
+CmdHist* create_cmd_hist(char *cmd)
+{
+	CmdHist *hist = (CmdHist *)	malloc(sizeof(CmdHist));
+	hist->next = NULL;
+	strcpy(hist->cmd, cmd);
+
+	return hist;
+}
+
+void read_hist_file(Shell *shelly)
+{
+	char c;
+	int i = 0;
+	char cmd[CMD_MAX_LEN];
+	CmdHist *shelly_hist = shelly->hist;
+	CmdHist *read_hist;
+	FILE *hist_file = shelly->hist_file;
+
+	while ((c=fgetc(hist_file)) != EOF) {
+		//shelly->cmdHist[1] = c;
+		if (c != '\n' && c != '\r')
+			cmd[i++] = c;
+		else if (i > 0) {
+			cmd[i + 1] = '\0';
+			read_hist = create_cmd_hist(cmd);
+			read_hist->next = shelly->hist;
+			shelly->hist = read_hist;
+			i = 0;
+		}
+	}
+}
+
 void add_to_hist(Shell *shelly, char *buf)
 {
+	// Add to shelly hist list
+	CmdHist *hist = create_cmd_hist(buf);
+	hist->next = shelly->hist;
+	shelly->hist = hist;
+
+	// Write to hist file
+	if (shelly->hist_file)
+		fprintf(shelly->hist_file, "%s\n", buf);
 }
 
 // Function to take input
