@@ -99,6 +99,7 @@ void read_hist_file(Shell *shelly, FILE *hist_file);
 CmdHist* create_cmd_hist(char *cmd);
 void add_to_hist(Shell *shelly, char *buf);
 int parse(CmdFunc *func, char argv[ARG_MAX][ARG_MAX_LEN], int *argc, char *cmd);
+void env_find_replace(char *dest, char *str);
 
 void termination_handler(int signum);
 
@@ -176,9 +177,13 @@ int parse(CmdFunc *func, char argv[ARG_MAX][ARG_MAX_LEN], int *argc, char *cmd)
 	int reached_end = 0;
 	char c;
 	int i;
+	char cmd_w_env[CMD_MAX_LEN];
+
+	env_find_replace(cmd_w_env, cmd);
+	
   // This is horrible, I know. Breaks when reached_end is true
 	for (i = 0; i < ARG_MAX_LEN; i++) {
-		c = cmd[i];
+		c = cmd_w_env[i];
 
 		if (c == '\0' || c == '\n')	
 			reached_end = 1;	/* Need to finish parsing arg */
@@ -215,7 +220,7 @@ int parse(CmdFunc *func, char argv[ARG_MAX][ARG_MAX_LEN], int *argc, char *cmd)
 	}
 
 	*argc = arg;
-	
+
 	return PARSE_OK;
 }
 
@@ -373,32 +378,6 @@ void exit_shell(Shell *shelly)
 //     
 // }
 
-// void cmdHistory(char* parsed, Shell* shelly)
-// {
-//   int i, j = 0;
-//
-//     // Clears command history
-//     if (parsed != NULL && !strcmp(parsed, "-c"))
-//     {
-//         for (i = 0; i < shelly->cmdCnt; i++)
-//             strcpy(shelly->cmdHist[i], "");
-//
-//         strcpy(shelly->cmdHist[0], "history -c");
-//         strcpy(parsed, "");
-//         shelly->cmdCnt = 1;
-//
-//         return;
-//     }
-//     // Prints command history
-//     else
-//     {
-//         for (i = shelly->cmdCnt - 1; i != 0; i--)
-//             printf("[%d]:   %s\n", j++, shelly->cmdHist[i]);
-//
-//         return;
-//     }
-// }
-
 // Must be null terminated
 CmdHist* create_cmd_hist(char *cmd)
 {
@@ -506,9 +485,45 @@ int dalek_help(Shell *shell, CmdArgv argv, int argc)
 	return 0;
 }
 
+// Write alpha numberic dirname to dir and returns the ending location in path
+// Returns NULL at the end of the path
+char* get_next_dir(char *dir, char *path)
+{
+	while (*path != '/') {
+		*dir = *path;
+
+		if (*path == '\0')
+			return NULL;
+
+		path++;
+		dir++;
+	}
+
+	// Move until next non-'/' to supports paths like
+	// /dev///whoops/too//many//slashes
+	while (*path == '/')
+		path++;
+
+	return path;
+}
+
 int movetodir(Shell *shell, CmdArgv argv, int argc)
 {
-  printf("movetodir\n");	
+	if (argc != 2)
+		return 1;
+	
+	char *path = argv[1];
+	char dirname[CMD_MAX_LEN];
+
+	if (chdir(path) != 0) {
+		printf("The directory '%s' does not exist!\n", path);
+	}
+	else {
+		char cwd[PATH_MAX];
+		getcwd(cwd, sizeof(cwd));
+		printf("Changed directory to '%s'\n", cwd);
+	}
+	
 	return 0;	
 }
 
@@ -520,7 +535,9 @@ int movetodir_help(Shell *shell, CmdArgv argv, int argc)
 
 int whereami(Shell *shell, CmdArgv argv, int argc)
 {
-  printf("whereami\n");	
+	char cwd[PATH_MAX];
+	getcwd(cwd, sizeof(cwd));
+	printf("%s\n", cwd);
 	return 0;	
 }
 
