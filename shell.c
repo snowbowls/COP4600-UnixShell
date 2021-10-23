@@ -57,6 +57,7 @@
 
 typedef struct Shell Shell;
 
+// This really should just be a linked-list... smh
 typedef char CmdVargs[ARG_MAX][ARG_MAX_LEN];
 typedef int (*CmdFunc)(Shell*, CmdVargs);
 
@@ -64,12 +65,14 @@ typedef struct CmdHist CmdHist;
 struct CmdHist {
 	CmdHist *next;
 	char cmd[CMD_MAX_LEN];
+  // Opted to re-parse for memory saving
+  // CmdFunc func;
+  // CmdVargs vargs;
 };
 
 struct Shell
 {
 	CmdHist *hist;
-	FILE *hist_file;
   char cwd[ARG_MAX_LEN]; // Current directory path
   // char mainDir[ARG_MAX_LEN];
   
@@ -86,7 +89,10 @@ enum ParseStatus {PARSE_OK=0, PARSE_INVALID_CHAR=1, PARSE_INVALID_CMD=2};
 
 int parse(CmdFunc *func, CmdVargs vargs, char *cmd);
 void add_to_hist(Shell *shelly, char *cmd);
-void read_hist_file(Shell *shelly);
+void read_hist_file(Shell *shelly, FILE *hist_file);
+CmdHist* create_cmd_hist(char *cmd);
+void add_to_hist(Shell *shelly, char *buf);
+void init_shell(Shell *shelly);
 
 int movetodir(Shell *shelly, CmdVargs argv);
 int whereami(Shell *shelly, CmdVargs argv);
@@ -113,11 +119,11 @@ static const char *greetings[] = {
 	"The shell to end all shells\n"
 	"... I hope I don't break anything...\n"
 
-	"  			.----.   @   @       \n"
-  "			 / .-\"-.`.  \\v/      \n"
-  " 		 | | '\\ \\ \\_/ )     \n"
-  "		 ,-\\ `-.' /.'  /        \n"
-  "		'---`----'----'          \n"
+	"       .----.   @   @       \n"
+  "      / .-\"-.`.  \\v/      \n"
+  "      | | '\\ \\ \\_/ )     \n"
+  "    ,-\\ `-.' /.'  /        \n"
+  "    '---`----'----'         \n"
 	,
 	
 	NULL
@@ -147,6 +153,7 @@ int parse(CmdFunc *func, char vargs[ARG_MAX][ARG_MAX_LEN], char *cmd)
 	int reached_end = 0;
 	char c;
 	int i;
+  // This is horrible, I know. Breaks when reached_end is true
 	for (i = 0; i < ARG_MAX_LEN; i++) {
 		c = cmd[i];
 
@@ -261,63 +268,15 @@ void init_shell(Shell *shelly) {
 	FILE *hist_file;
 
 	env_find_replace(hist_filepath, HIST_FILEPATH);
-	hist_file = fopen(hist_filepath, "a+");
+  shelly->hist = NULL;
 	if (hist_file) {
-		shelly->hist_file = hist_file;	
-		read_hist_file(shelly);
+		read_hist_file(shelly, hist_file);
+    fclose(hist_file);
 	}
-	else {
-		shelly->hist = NULL;
-		shelly->hist_file = NULL;
-	}
+
 	// fseek(hist_file, 0, SEEK_SET);
 	getcwd(shelly->cwd, CMD_MAX_LEN);
 }
-
-// Greeting shell during startup
-// void init_shell(Shell* shelly)
-// {
-// 	clear();
-//   
-//   // Read history file
-// 	char c;
-//   char str[100];
-//   char cmdHistTemp[MAXLIST][1024];
-//   int cnt = 0;
-//   int i = 0;
-//   FILE *file;
-//   file = fopen("hist", "rt");
-//   if (file) {
-//     while ((c=fgetc(file)) != EOF) {
-//       //shelly->cmdHist[1] = c;
-//       if (c != '\n')
-//         str[i++] = c;
-//       else
-//       {
-//         strcpy(cmdHistTemp[cnt++], str);
-//         memset(str, 0, sizeof(str));
-//         i=0;
-//       }
-//     }
-//     fclose(file);
-//   }
-//   while (cnt!=-1) {
-//     strcpy(shelly->cmdHist[shelly->cmdCnt++],cmdHistTemp[cnt--]);
-//   }
-//   
-//   
-// 	printf("\n\n\n\n******************"
-// 			"************************");
-// 	printf("\n\n\n\t****The Shell to End all Shells****");
-// 	printf("\n\n\t-hope I don't break anything-");
-// 	printf("\n\n\n\n*******************"
-// 			"***********************");
-// 	char* username = getenv("USER");
-// 	printf("\n\n\nThe Supreme Ruler is: @%s", username);
-// 	printf("\n");
-// 	sleep(1);
-// 	//clear();
-// }
   
   
 // Change directory builtin
@@ -527,21 +486,21 @@ CmdHist* create_cmd_hist(char *cmd)
 	return hist;
 }
 
-void read_hist_file(Shell *shelly)
+void read_hist_file(Shell *shelly, FILE *hist_file)
 {
 	char c;
 	int i = 0;
 	char cmd[CMD_MAX_LEN];
-	CmdHist *shelly_hist = shelly->hist;
 	CmdHist *read_hist;
-	FILE *hist_file = shelly->hist_file;
 
+  printf("shelly hist:%p\n", shelly->hist);
 	while ((c=fgetc(hist_file)) != EOF) {
 		//shelly->cmdHist[1] = c;
 		if (c != '\n' && c != '\r')
 			cmd[i++] = c;
 		else if (i > 0) {
 			cmd[i + 1] = '\0';
+      printf("'%s'\n", cmd);
 			read_hist = create_cmd_hist(cmd);
 			read_hist->next = shelly->hist;
 			shelly->hist = read_hist;
@@ -558,12 +517,15 @@ void add_to_hist(Shell *shelly, char *buf)
 	shelly->hist = hist;
 
 	// Write to hist file
-	if (shelly->hist_file)
-		fprintf(shelly->hist_file, "%s\n", buf);
+  FILE *hist_file = fopen(HIST_FILEPATH, "w");
+	if (hist_file) {
+		fprintf(hist_file, "%s\n", buf);
+    fclose(hist_file);
+  }
 }
 
 // Function to take input
-int takeInput(char* str, Shell* shelly)
+int take_input(char* str, Shell* shelly)
 {
 	char* buf;
 	char buf_env[CMD_MAX_LEN];
@@ -628,57 +590,22 @@ int replay(Shell *shell, CmdVargs argv)
 	return 0;	
 }
 
+void print_hist_list(Shell *shelly)
+{
+  CmdHist *hist = shelly->hist;
+  printf("Printing history list...\n");
+  while (hist != NULL) {
+    printf("%s\n", hist->cmd);
+    hist = hist->next;
+  }
+  printf("End of history.\n");
+}
+
 int main()
 {
 	Shell shelly;
 
-	CmdFunc func;
-	CmdVargs vargs;
-	printf("returned: %d\n", parse(&func, vargs, "background sh -c suck my balls"));
-	func(&shelly, vargs);
-	// proc.func(NULL);
-	
-	char test[ARG_MAX_LEN];
-	printf("%s\n", HIST_FILEPATH);
-	env_find_replace(test, HIST_FILEPATH);
-	printf("%s\n", test);
+	init_shell(&shelly);
+	printf("%s\n", get_random_greeting());
+  print_hist_list(&shelly);
 }
-
-// int main()
-// {
-//     char inputString[MAXCOM], *parsedArgs[MAXLIST];
-//     char* parsedArgsPiped[MAXLIST];
-//     int execFlag = 0;
-//   
-//   // Initializing struct
-//   Shell *shelly;
-//   shelly = calloc(1, sizeof(Shell));
-//     getcwd(shelly->cwd, sizeof(shelly->cwd));
-//   getcwd(shelly->mainDir, sizeof(shelly->mainDir));
-//   shelly->cmdCnt = 0;
-//   
-//   // Starter function
-//     init_shell(shelly);
-//   
-//   
-//     while (1) {
-//         // take input
-//         if (takeInput(inputString, shelly))
-//             continue;
-//         // process
-//         execFlag = processString(inputString,
-//         parsedArgs, parsedArgsPiped, shelly);
-//         // execflag returns zero if there is no command
-//         // or it is a builtin command,
-//         // 1 if it is a simple command
-//         // 2 if it is including a pipe.
-//   
-//         // execute
-//         if (execFlag == 1)
-//             execArgs(parsedArgs);
-//   
-//         if (execFlag == 2)
-//             execArgsPiped(parsedArgs, parsedArgsPiped);
-//     }
-//     return 0;
-// }
