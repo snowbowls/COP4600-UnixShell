@@ -3,6 +3,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <math.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <readline/readline.h>
@@ -105,6 +106,20 @@ static const CmdDef builtin_cmds[] = {
 	{"background", background},
 	{"dalek", dalek},
 	{NULL, NULL}
+};
+
+static const char *greetings[] = {
+	"The shell to end all shells\n"
+	"... I hope I don't break anything...\n"
+
+	"  			.----.   @   @       \n"
+  "			 / .-\"-.`.  \\v/      \n"
+  " 		 | | '\\ \\ \\_/ )     \n"
+  "		 ,-\\ `-.' /.'  /        \n"
+  "		'---`----'----'          \n"
+	,
+	
+	NULL
 };
 
 CmdFunc parse_cmd(char *cmd_name)
@@ -229,6 +244,21 @@ void env_find_replace(char *dest, char *str)
 
 	*dest = '\0';
 }
+
+
+const char* get_random_greeting() {
+	int len = 0;	
+
+	while (greetings[len] != NULL)
+		len++;
+	
+	return greetings[rand() % len];	
+}
+
+void init_shell(Shell *shell) {
+	
+}
+
 // Greeting shell during startup
 // void init_shell(Shell* shelly)
 // {
@@ -274,84 +304,7 @@ void env_find_replace(char *dest, char *str)
 // 	//clear();
 // }
   
-// Function where the system command is executed
-void execArgs(char** parsed)
-{
-	// Forking a child
-	pid_t pid = fork(); 
-
-	if (pid == -1) {
-		printf("\nFailed forking child..");
-		return;
-	} 
-	else if (pid == 0) {
-		if (execvp(parsed[0], parsed) < 0) {
-				printf("\nCould not execute command..");
-		}
-		exit(0);
-	} 
-	else {
-		// waiting for child to terminate
-		wait(NULL); 
-		return;
-	}
-}
   
-// Function where the piped system commands is executed
-void execArgsPiped(char** parsed, char** parsedpipe)
-{
-    // 0 is read end, 1 is write end
-    int pipefd[2]; 
-    pid_t p1, p2;
-  
-    if (pipe(pipefd) < 0) {
-        printf("\nPipe could not be initialized");
-        return;
-    }
-    p1 = fork();
-    if (p1 < 0) {
-        printf("\nCould not fork");
-        return;
-    }
-  
-    if (p1 == 0) {
-        // Child 1 executing..
-        // It only needs to write at the write end
-        close(pipefd[0]);
-        dup2(pipefd[1], STDOUT_FILENO);
-        close(pipefd[1]);
-  
-        if (execvp(parsed[0], parsed) < 0) {
-            printf("\nCould not execute command 1..");
-            exit(0);
-        }
-    } else {
-        // Parent executing
-        p2 = fork();
-  
-        if (p2 < 0) {
-            printf("\nCould not fork");
-            return;
-        }
-  
-        // Child 2 executing..
-        // It only needs to read at the read end
-        if (p2 == 0) {
-            close(pipefd[1]);
-            dup2(pipefd[0], STDIN_FILENO);
-            close(pipefd[0]);
-            if (execvp(parsedpipe[0], parsedpipe) < 0) {
-                printf("\nCould not execute command 2..");
-                exit(0);
-            }
-        } else {
-            // parent executing, waiting for two children
-            wait(NULL);
-            wait(NULL);
-        }
-    }
-}
-
 // Change directory builtin
 // void movetodir(char* parsed, Shell* shelly)
 // {
@@ -548,81 +501,29 @@ void openHelp()
 //   
 //     return 0;
 // }
-  
-// function for finding pipe
-int parsePipe(char* str, char** strpiped)
-{
-    int i;
-    for (i = 0; i < 2; i++) {
-        strpiped[i] = strsep(&str, "|");
-        if (strpiped[i] == NULL)
-            break;
-    }
-  
-    if (strpiped[1] == NULL)
-        return 0; // returns zero if no pipe is found.
-    else {
-        return 1;
-    }
-}
-  
-// function for parsing command words
-void parseSpace(char* str, char** parsed)
-{
-    int i;
-  
-    for (i = 0; i < MAXLIST; i++) {
-        parsed[i] = strsep(&str, " ");
-  
-        if (parsed[i] == NULL)
-            break;
-        if (strlen(parsed[i]) == 0)
-            i--;
-    }
-}
-  
-// int processString(char* str, char** parsed, char** parsedpipe, Shell* shelly)
-// {
-//     char* strpiped[2];
-//     int piped = 0;
-//   
-//     piped = parsePipe(str, strpiped);
-//   
-//     if (piped) {
-//         parseSpace(strpiped[0], parsed);
-//         parseSpace(strpiped[1], parsedpipe);
-//   
-//     } else {
-//   
-//         parseSpace(str, parsed);
-//     }
-//   
-//     if (ownCmdHandler(parsed, shelly))
-//         return 0;
-//     else
-//         return 1 + piped;
-// }
 
-// void add_to_hist(Shell *shelly, char *cmd)
-// {
-// 	s
-// }
+void add_to_hist(Shell *shelly, char *buf)
+{
+}
 
 // Function to take input
-// int takeInput(char* str, Shell* shelly)
-// {
-//     char* buf;
-//  
-//     buf = readline("\n>>> ");
-//     if (strlen(buf) != 0) {
-// 			
-// 			strcpy(shelly->cmdHist[shelly->cmdCnt++], buf);
-// 			strcpy(str, buf);
-// 			return 0;
-//     } else {
-//         return 1;
-//     }
-// }
+int takeInput(char* str, Shell* shelly)
+{
+	char* buf;
+	char buf_env[CMD_MAX_LEN];
+
+	buf = readline("\n>>> ");
+	if (strlen(buf) != 0) {
+		add_to_hist(shelly, buf);
+		env_find_replace(buf_env, buf);
+		strcpy(str, buf);
+
+		return 0;
+	} 
+	else {
+		return 1;
+	}
+}
 
 int start(Shell *shell, CmdVargs argv)
 {
