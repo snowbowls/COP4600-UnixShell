@@ -214,7 +214,7 @@ int parse(CmdFunc *func, char argv[ARG_MAX][ARG_MAX_LEN], int *argc, char *cmd)
 		}
 	}
 
-	*argc = arg + 1;
+	*argc = arg;
 	
 	return PARSE_OK;
 }
@@ -532,7 +532,7 @@ int whereami_help(Shell *shell, CmdArgv argv, int argc)
 
 int history(Shell *shell, CmdArgv argv, int argc)
 {
-	history_rev(shell->hist, shell->hist_len - 1);
+	history_rev(shell->hist, 0);
 
 	return 0;	
 }
@@ -540,7 +540,7 @@ int history(Shell *shell, CmdArgv argv, int argc)
 void history_rev(CmdHist *hist, int i)
 {
 	if (hist->next)
-		history_rev(hist->next, i-1);	
+		history_rev(hist->next, i+1);	
 	
 	printf("%d: %s\n", i, hist->cmd);
 }
@@ -566,7 +566,51 @@ int byebye_help(Shell *shell, CmdArgv argv, int argc)
 
 int replay(Shell *shell, CmdArgv argv, int argc)
 {
-  printf("replay\n");	
+	if (argc != 2) {
+		replay_help(shell, argv, argc);
+		return 1;
+	}
+
+	int replay_num = strtol(argv[1], NULL, 10);
+	int i = replay_num;
+	CmdHist *hist = shell->hist;
+	CmdArgv replay_argv;
+	int replay_argc;
+	CmdFunc replay_func;
+	const int max_recursive_replay = 16;
+	static int recursive_relay_count = 0;
+
+	if (recursive_relay_count > max_recursive_replay) {
+		printf("Hit maximum replay recursion count (%d)!\n", max_recursive_replay);
+		return 1;
+	}
+
+	while (i > 0 && hist) {
+		hist = hist->next;
+		i--;
+	}
+
+	// Either couldn't go back replay_num spaces or we could but it's NULL
+	if (i != 0 || hist == NULL) {
+		printf("The history doesn't go back that far (%d)\n", replay_num);
+		return 1;	
+	}
+
+	printf("Running '%s'\n", hist->cmd);
+	int parse_result = parse(&replay_func, replay_argv, &replay_argc, hist->cmd);	
+	if (!parse_result) {
+		if (replay_func == replay) 
+			recursive_relay_count++;
+
+		replay_func(shell, replay_argv, replay_argc);	
+
+		if (replay_func == replay) 
+			recursive_relay_count--;
+	}
+	else {
+		printf("Invalid command!\n");
+	}
+
 	return 0;	
 }
 
