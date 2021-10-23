@@ -87,12 +87,11 @@ typedef struct CmdDef {
 
 enum ParseStatus {PARSE_OK=0, PARSE_INVALID_CHAR=1, PARSE_INVALID_CMD=2};
 
-int parse(CmdFunc *func, CmdVargs vargs, char *cmd);
-void add_to_hist(Shell *shelly, char *cmd);
+void init_shell(Shell *shelly);
 void read_hist_file(Shell *shelly, FILE *hist_file);
 CmdHist* create_cmd_hist(char *cmd);
 void add_to_hist(Shell *shelly, char *buf);
-void init_shell(Shell *shelly);
+int parse(CmdFunc *func, CmdVargs vargs, char *cmd);
 
 int movetodir(Shell *shelly, CmdVargs argv);
 int whereami(Shell *shelly, CmdVargs argv);
@@ -525,7 +524,7 @@ void add_to_hist(Shell *shelly, char *buf)
 }
 
 // Function to take input
-int take_input(char* str, Shell* shelly)
+int take_input(Shell* shelly, char* str)
 {
 	char* buf;
 	char buf_env[CMD_MAX_LEN];
@@ -534,7 +533,7 @@ int take_input(char* str, Shell* shelly)
 	if (strlen(buf) != 0) {
 		add_to_hist(shelly, buf);
 		env_find_replace(buf_env, buf);
-		strcpy(str, buf);
+		strcpy(str, buf_env);
 
 		return 0;
 	} 
@@ -545,48 +544,49 @@ int take_input(char* str, Shell* shelly)
 
 int start(Shell *shell, CmdVargs argv)
 {
-	
+  printf("start\n");	
 	return 0;
 }
 
 int background(Shell *shell, CmdVargs argv)
 {
-	
+  printf("background\n");	
 	return 0;
 }
 
 int dalek(Shell *shell, CmdVargs argv)
 {
-	
+  printf("dalek\n");	
 	return 0;
 }
 
 int movetodir(Shell *shell, CmdVargs argv)
 {
+  printf("movetodir\n");	
 	return 0;	
 }
 
 int whereami(Shell *shell, CmdVargs argv)
 {
-	
+  printf("whereami\n");	
 	return 0;	
 }
 
 int history(Shell *shell, CmdVargs argv)
 {
-	
+  printf("history\n");	
 	return 0;	
 }
 
 int byebye(Shell *shell, CmdVargs argv)
 {
-	
+  printf("byebye\n");	
 	return 0;	
 }
 
 int replay(Shell *shell, CmdVargs argv)
 {
-	
+  printf("replay\n");	
 	return 0;	
 }
 
@@ -604,8 +604,30 @@ void print_hist_list(Shell *shelly)
 int main()
 {
 	Shell shelly;
+  char cmd_buf[CMD_MAX_LEN];
+  // This will be dynamically allocated later...maybe
+  char cmd_vargs[ARG_MAX][ARG_MAX_LEN];
+  CmdFunc cmd;
 
 	init_shell(&shelly);
 	printf("%s\n", get_random_greeting());
-  print_hist_list(&shelly);
+  // print_hist_list(&shelly);
+  
+  while (1) {
+    if (take_input(&shelly, cmd_buf)) {
+      printf("\n");
+    }
+    else {
+      enum ParseStatus status = parse(&cmd, cmd_vargs, cmd_buf);
+      switch(status) {
+        case PARSE_OK:
+          cmd(&shelly, cmd_vargs);
+          break;
+        case PARSE_INVALID_CHAR:
+        case PARSE_INVALID_CMD:
+          printf("Invalid command!\n");
+          break;
+      }
+    }
+  }
 }
