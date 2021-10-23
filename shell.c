@@ -73,7 +73,8 @@ struct CmdHist {
 struct Shell
 {
 	CmdHist *hist;
-  char cwd[ARG_MAX_LEN]; // Current directory path
+  char *hist_filepath;
+  char *cwd; // Current directory path
   // char mainDir[ARG_MAX_LEN];
   
 	int bgpids[MAX_BG_JOBS];
@@ -88,6 +89,7 @@ typedef struct CmdDef {
 enum ParseStatus {PARSE_OK=0, PARSE_INVALID_CHAR=1, PARSE_INVALID_CMD=2};
 
 void init_shell(Shell *shelly);
+void exit_shell(Shell *shelly);
 void read_hist_file(Shell *shelly, FILE *hist_file);
 CmdHist* create_cmd_hist(char *cmd);
 void add_to_hist(Shell *shelly, char *buf);
@@ -263,18 +265,26 @@ const char* get_random_greeting() {
 }
 
 void init_shell(Shell *shelly) {
-	char hist_filepath[CMD_MAX_LEN];
+	char *hist_filepath = (char *) malloc(sizeof(char) * PATH_MAX);
 	FILE *hist_file;
 
 	env_find_replace(hist_filepath, HIST_FILEPATH);
+  shelly->hist_filepath = hist_filepath;
   shelly->hist = NULL;
+  hist_file = fopen(hist_filepath, "r");
 	if (hist_file) {
 		read_hist_file(shelly, hist_file);
     fclose(hist_file);
 	}
 
-	// fseek(hist_file, 0, SEEK_SET);
-	getcwd(shelly->cwd, CMD_MAX_LEN);
+  fclose(hist_file);
+	shelly->cwd = getcwd(NULL, 0);
+}
+
+void exit_shell(Shell *shelly)
+{
+  free(shelly->cwd);
+  free(shelly->hist_filepath);
 }
   
   
@@ -516,7 +526,7 @@ void add_to_hist(Shell *shelly, char *buf)
 	shelly->hist = hist;
 
 	// Write to hist file
-  FILE *hist_file = fopen(HIST_FILEPATH, "w");
+  FILE *hist_file = fopen(shelly->hist_filepath, "a");
 	if (hist_file) {
 		fprintf(hist_file, "%s\n", buf);
     fclose(hist_file);
