@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <math.h>
+#include <signal.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <readline/readline.h>
@@ -58,8 +59,8 @@
 typedef struct Shell Shell;
 
 // This really should just be a linked-list... smh
-typedef char CmdVargs[ARG_MAX][ARG_MAX_LEN];
-typedef int (*CmdFunc)(Shell*, CmdVargs);
+typedef char CmdArgv[ARG_MAX][ARG_MAX_LEN];
+typedef int (*CmdFunc)(Shell*, CmdArgv);
 
 typedef struct CmdHist CmdHist;
 struct CmdHist {
@@ -67,7 +68,7 @@ struct CmdHist {
 	char cmd[CMD_MAX_LEN];
   // Opted to re-parse for memory saving
   // CmdFunc func;
-  // CmdVargs vargs;
+  // CmdArgv vargs;
 };
 
 struct Shell
@@ -79,41 +80,60 @@ struct Shell
   
 	int bgpids[MAX_BG_JOBS];
 	int num_bgpids;
+
+	int is_running;
 };
 
 typedef struct CmdDef {
 	char *cmd_name;
 	CmdFunc func;
+	CmdFunc help;
 } CmdDef;
 
 enum ParseStatus {PARSE_OK=0, PARSE_INVALID_CHAR=1, PARSE_INVALID_CMD=2};
 
-void init_shell(Shell *shelly);
+void init_shell(Shell*, int);
 void exit_shell(Shell *shelly);
 void read_hist_file(Shell *shelly, FILE *hist_file);
 CmdHist* create_cmd_hist(char *cmd);
 void add_to_hist(Shell *shelly, char *buf);
-int parse(CmdFunc *func, CmdVargs vargs, char *cmd);
+int parse(CmdFunc *func, CmdArgv vargs, char *cmd);
 
-int movetodir(Shell *shelly, CmdVargs argv);
-int whereami(Shell *shelly, CmdVargs argv);
-int history(Shell *shelly, CmdVargs argv);
-int byebye(Shell *shelly, CmdVargs argv);
-int replay(Shell *shelly, CmdVargs argv);
-int start(Shell *shelly, CmdVargs argv);
-int background(Shell *shelly, CmdVargs argv);
-int dalek(Shell *shelly, CmdVargs argv);
+void termination_handler(int signum);
+
+int movetodir(Shell *shelly, CmdArgv argv);
+int whereami(Shell *shelly, CmdArgv argv);
+int history(Shell *shelly, CmdArgv argv);
+int byebye(Shell *shelly, CmdArgv argv);
+int replay(Shell *shelly, CmdArgv argv);
+int start(Shell *shelly, CmdArgv argv);
+int background(Shell *shelly, CmdArgv argv);
+int dalek(Shell *shelly, CmdArgv argv);
+int movetodir_help(Shell *shelly, CmdArgv argv);
+int whereami_help(Shell *shelly, CmdArgv argv);
+int history_help(Shell *shelly, CmdArgv argv);
+int byebye_help(Shell *shelly, CmdArgv argv);
+int replay_help(Shell *shelly, CmdArgv argv);
+int start_help(Shell *shelly, CmdArgv argv);
+int background_help(Shell *shelly, CmdArgv argv);
+int dalek_help(Shell *shelly, CmdArgv argv);
+int shell_exit(Shell *shell, CmdArgv argv);
+int shell_help(Shell *shell, CmdArgv argv);
+
+Shell *root_shell = NULL;
 
 static const CmdDef builtin_cmds[] = {
-	{"movetodir", movetodir},
-	{"whereami", whereami},
-	{"history", history},
-	{"byebye", byebye},
-	{"replay", replay},
-	{"start", start},
-	{"background", background},
-	{"dalek", dalek},
-	{NULL, NULL}
+	{"movetodir", movetodir, movetodir_help},
+	{"whereami", whereami, whereami_help},
+	{"history", history, history_help},
+	{"byebye", byebye, byebye_help},
+	{"replay", replay, replay_help},
+	{"start", start, start_help},
+	{"background", background, background_help},
+	{"dalek", dalek, dalek_help},
+	{"exit", shell_exit, NULL},
+	{"help", shell_help, NULL},
+	{NULL, NULL, NULL}
 };
 
 static const char *greetings[] = {
@@ -165,7 +185,7 @@ int parse(CmdFunc *func, char vargs[ARG_MAX][ARG_MAX_LEN], char *cmd)
 			// Done parsing arg
 			if (parsing_arg) {
 				vargs[arg][arg_len] = '\0';
-				printf("parsed argv: '%s'\n", vargs[arg]);
+				// printf("parsed argv: '%s'\n", vargs[arg]);
 
 				if (arg == 0) {
 					CmdFunc cmd_func = parse_cmd(vargs[0]);
@@ -264,14 +284,14 @@ const char* get_random_greeting() {
 	return greetings[rand() % len];	
 }
 
-void init_shell(Shell *shelly) {
+void init_shell(Shell *shelly, int is_subshell) {
 	char *hist_filepath = (char *) malloc(sizeof(char) * ARG_MAX_LEN);
 	FILE *hist_file;
 
 	env_find_replace(hist_filepath, HIST_FILEPATH);
   shelly->hist_filepath = hist_filepath;
   shelly->hist = NULL;
-	printf("%s\n", hist_filepath);
+	// printf("%s\n", hist_filepath);
   hist_file = fopen(hist_filepath, "r");
 	if (hist_file) {
 		read_hist_file(shelly, hist_file);
@@ -279,6 +299,13 @@ void init_shell(Shell *shelly) {
 	}
 
 	shelly->cwd = getcwd(NULL, 0);
+	shelly->is_running = 1;
+
+	if (is_subshell) {
+		root_shell = shelly;
+		signal(SIGTERM, termination_handler);
+		signal(SIGINT, SIG_IGN);
+	}
 }
 
 void exit_shell(Shell *shelly)
@@ -552,51 +579,118 @@ int take_input(Shell* shelly, char* str)
 	}
 }
 
-int start(Shell *shell, CmdVargs argv)
+int start(Shell *shell, CmdArgv argv)
 {
   printf("start\n");	
 	return 0;
 }
 
-int background(Shell *shell, CmdVargs argv)
+int start_help(Shell *shell, CmdArgv argv)
+{
+  printf("start <program> [param]      start a program\n");	
+	return 0;
+}
+
+
+int background(Shell *shell, CmdArgv argv)
 {
   printf("background\n");	
 	return 0;
 }
 
-int dalek(Shell *shell, CmdVargs argv)
+int background_help(Shell *shell, CmdArgv argv)
+{
+  printf("background <program> [param] start a program in the background\n");	
+	return 0;
+}
+
+
+int dalek(Shell *shell, CmdArgv argv)
 {
   printf("dalek\n");	
 	return 0;
 }
 
-int movetodir(Shell *shell, CmdVargs argv)
+int dalek_help(Shell *shell, CmdArgv argv)
+{
+  printf("dalek <pid>                  kill the process w/ pid <pid>\n");	
+	return 0;
+}
+
+int movetodir(Shell *shell, CmdArgv argv)
 {
   printf("movetodir\n");	
 	return 0;	
 }
 
-int whereami(Shell *shell, CmdVargs argv)
+int movetodir_help(Shell *shell, CmdArgv argv)
+{
+  printf("movetodir <dir>              change cwd\n");	
+	return 0;	
+}
+
+int whereami(Shell *shell, CmdArgv argv)
 {
   printf("whereami\n");	
 	return 0;	
 }
 
-int history(Shell *shell, CmdVargs argv)
+int whereami_help(Shell *shell, CmdArgv argv)
+{
+  printf("whereami                     prints cwd\n");	
+	return 0;	
+}
+
+int history(Shell *shell, CmdArgv argv)
 {
   printf("history\n");	
 	return 0;	
 }
 
-int byebye(Shell *shell, CmdVargs argv)
+int history_help(Shell *shell, CmdArgv argv)
 {
-  printf("byebye\n");	
+  printf("history [-c]                 prints history\n"
+				 "                             -c to clear history\n");	
 	return 0;	
 }
 
-int replay(Shell *shell, CmdVargs argv)
+int byebye(Shell *shell, CmdArgv argv)
+{
+	shell_exit(shell, argv);
+	return 0;	
+}
+
+int byebye_help(Shell *shell, CmdArgv argv)
+{
+  printf("byebye                       exit shell - also can use 'exit'\n");	
+	return 0;	
+}
+
+int replay(Shell *shell, CmdArgv argv)
 {
   printf("replay\n");	
+	return 0;	
+}
+
+int replay_help(Shell *shell, CmdArgv argv)
+{
+  printf("replay <n>                   re-run the last n-th program\n");	
+	return 0;	
+}
+
+int shell_exit(Shell *shell, CmdArgv argv)
+{
+	shell->is_running = 0;
+	return 0;
+}
+
+int shell_help(Shell *shell, CmdArgv argv)
+{
+	printf("Mysh usage:\n");
+	for (int i = 0; builtin_cmds[i].cmd_name != NULL; i++) {
+		if (builtin_cmds[i].help)
+			builtin_cmds[i].help(shell, NULL);	
+	}
 	return 0;	
 }
 
@@ -611,6 +705,14 @@ void print_hist_list(Shell *shelly)
   printf("End of history.\n");
 }
 
+void termination_handler(int signum)
+{
+	if (root_shell == NULL)
+		return;
+
+	exit_shell(root_shell);	
+}
+
 int main()
 {
 	Shell shelly;
@@ -619,11 +721,11 @@ int main()
   char cmd_vargs[ARG_MAX][ARG_MAX_LEN];
   CmdFunc cmd;
 
-	init_shell(&shelly);
+	init_shell(&shelly, 1);
 	printf("%s\n", get_random_greeting());
   // print_hist_list(&shelly);
   
-  while (1) {
+  while (shelly.is_running) {
     if (take_input(&shelly, cmd_buf)) {
       printf("\n");
     }
@@ -640,4 +742,6 @@ int main()
       }
     }
   }
+
+	exit_shell(&shelly);
 }
