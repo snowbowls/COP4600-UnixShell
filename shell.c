@@ -74,6 +74,7 @@ struct CmdHist {
 struct Shell
 {
 	CmdHist *hist;
+	int hist_len;
   char *hist_filepath;
   char *cwd; // Current directory path
   // char mainDir[ARG_MAX_LEN];
@@ -104,6 +105,7 @@ void termination_handler(int signum);
 int movetodir(Shell *shelly, CmdArgv argv);
 int whereami(Shell *shelly, CmdArgv argv);
 int history(Shell *shelly, CmdArgv argv);
+void history_rev(CmdHist *hist, int i);
 int byebye(Shell *shelly, CmdArgv argv);
 int replay(Shell *shelly, CmdArgv argv);
 int start(Shell *shelly, CmdArgv argv);
@@ -287,6 +289,7 @@ const char* get_random_greeting() {
 void init_shell(Shell *shelly, int is_subshell) {
 	char *hist_filepath = (char *) malloc(sizeof(char) * ARG_MAX_LEN);
 	FILE *hist_file;
+	shelly->hist_len = 0;
 
 	env_find_replace(hist_filepath, HIST_FILEPATH);
   shelly->hist_filepath = hist_filepath;
@@ -394,124 +397,6 @@ void exit_shell(Shell *shelly)
 //     }
 // }
 
-// char** replay(char* parsed, Shell* shelly)
-// {
-//   char** newParse;
-//   
-//   int histcnt = ((int) *(parsed) - 46); // Don't ask, no clue why it's needed
-//   int parsedint = ((int) *(parsed) - 48);
-//   printf("Replaying command [%d]:   %s\n", parsedint , shelly->cmdHist[shelly->cmdCnt - histcnt]);
-//   
-//   char *string;
-//   char *found;
-//   int i = 0;
-//
-//     string = strdup(shelly->cmdHist[shelly->cmdCnt - histcnt]);
-//   
-//   printf("%s\n", string);
-//   newParse[0] = strsep(&string, " ");
-//   printf("%s\n", string);
-//   newParse[1] = strsep(&string, " ");
-//   
-//   fflush(stdout);
-//   return newParse;
-// }
-
-// void byebye(Shell* shelly)
-// {
-//   printf("\nGoodbye\n");
-//   char* filename = shelly->mainDir;
-//   strcat(filename, "/hist");
-//   FILE *file = fopen(filename, "w");
-//   int results;
-//   for (int i = shelly->cmdCnt - 1; i > 0; i--)
-//   {
-//             results = fputs(shelly->cmdHist[i], file);
-//       results = fputs("\n",file);
-//   }
-//   fclose(file);
-//   free(shelly);
-//     exit(0);
-// }
-
-// Help command
-void openHelp()
-{
-    printf("(1) 'movetodir [directory]'     Changes direcory. No need for '/' before folder name\n");
-  printf("(2) 'whereami'        Prints current directory\n");
-  printf("(3) 'history [-c]'        Prints history or clears history if '-c' is present\n");
-  printf("(4) 'byebye'        Terminates Shell\n");
-  printf("(5) 'replay [number]'       Re-executes the command labeled with number in the history\n");
-  printf("(6) 'start program [parameters]' \n");
-  printf("(7) 'background program [parameters]' \n");
-  printf("(8) 'dalek PID' \n");
-  
-    return;
-}
-  
-// Function to execute builtin commands
-// int ownCmdHandler(char** parsed, Shell* shelly)
-// {
-// 	int NoOfOwnCmds = 7, i, switchOwnArg = 0;
-// 	char* ListOfOwnCmds[NoOfOwnCmds];
-// 	char* username;
-//   char* cmdLine;
-//   char** replayParse;
-//   
-// 	ListOfOwnCmds[0] = "byebye";
-// 	ListOfOwnCmds[1] = "replay";
-// 	ListOfOwnCmds[2] = "help";
-// 	ListOfOwnCmds[3] = "hello";
-//   ListOfOwnCmds[4] = "movetodir";
-//   ListOfOwnCmds[5] = "whereami";
-//   ListOfOwnCmds[6] = "history";
-//   
-// 	for (i = 0; i < NoOfOwnCmds; i++) {
-// 		if (strcmp(parsed[0], ListOfOwnCmds[i]) == 0) {
-// 			switchOwnArg = i + 1;
-// 			break;
-// 		}
-// 	}
-//   
-// 	switch (switchOwnArg) {
-// 	case 1:
-// 		byebye(shelly);
-// 	case 2:
-// 		replayParse = replay(parsed[1], shelly);
-// 	
-// 	//printf("\n%s", replayParse[0]);
-// 	//printf("\n%s", replayParse[1]);
-// 	fflush(stdout);
-// 	return 1;
-// 			//return ownCmdHandler(replayParse, shelly);
-// 	case 3:
-// 		openHelp();
-// 		return 1;
-// 	case 4:
-// 		username = getenv("USER");
-// 		printf("\nHello %s.\nMind that this is "
-// 				"not a place to play around."
-// 				"\nUse help to know more..\n",
-// 				username);
-// 		return 1;
-//   case 5:
-//     if (parsed[1] != NULL)
-//       movetodir(parsed[1], shelly);
-//     else printf("Need path");
-//     return 1;
-//   case 6:
-//     printf("  %s", shelly->cwd);
-//     return 1;
-//   case 7:
-//     cmdHistory(parsed[1], shelly);
-//     return 1;
-//     default:
-//         break;
-//     }
-//   
-//     return 0;
-// }
-
 // Must be null terminated
 CmdHist* create_cmd_hist(char *cmd)
 {
@@ -529,17 +414,18 @@ void read_hist_file(Shell *shelly, FILE *hist_file)
 	char cmd[CMD_MAX_LEN];
 	CmdHist *read_hist;
 
-  printf("shelly hist:%p\n", shelly->hist);
+  // printf("shelly hist:%p\n", shelly->hist);
 	while ((c=fgetc(hist_file)) != EOF) {
 		//shelly->cmdHist[1] = c;
 		if (c != '\n' && c != '\r')
 			cmd[i++] = c;
 		else if (i > 0) {
 			cmd[i + 1] = '\0';
-      printf("'%s'\n", cmd);
+      // printf("'%s'\n", cmd);
 			read_hist = create_cmd_hist(cmd);
 			read_hist->next = shelly->hist;
 			shelly->hist = read_hist;
+			shelly->hist_len++;
 			i = 0;
 		}
 	}
@@ -551,6 +437,7 @@ void add_to_hist(Shell *shelly, char *buf)
 	CmdHist *hist = create_cmd_hist(buf);
 	hist->next = shelly->hist;
 	shelly->hist = hist;
+	shelly->hist_len++;
 
 	// Write to hist file
   FILE *hist_file = fopen(shelly->hist_filepath, "a");
@@ -643,8 +530,17 @@ int whereami_help(Shell *shell, CmdArgv argv)
 
 int history(Shell *shell, CmdArgv argv)
 {
-  printf("history\n");	
+	history_rev(shell->hist, shell->hist_len - 1);
+
 	return 0;	
+}
+
+void history_rev(CmdHist *hist, int i)
+{
+	if (hist->next)
+		history_rev(hist->next, i-1);	
+	
+	printf("%d: %s\n", i, hist->cmd);
 }
 
 int history_help(Shell *shell, CmdArgv argv)
