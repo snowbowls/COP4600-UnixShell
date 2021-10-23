@@ -19,6 +19,7 @@
 // Clearing the shell using escape sequences
 #define clear() printf("\033[H\033[J")
 #define HIST_FILEPATH "$HOME/.shelly-history"
+#define DEFAULT_PROMPT "$PWD # "
 
 // Using this for getcwd
 #define ARG_MAX_LEN 1024
@@ -83,6 +84,8 @@ struct Shell
 	int num_bgpids;
 
 	int is_running;
+
+	char *prompt;
 };
 
 typedef struct CmdDef {
@@ -177,13 +180,10 @@ int parse(CmdFunc *func, char argv[ARG_MAX][ARG_MAX_LEN], int *argc, char *cmd)
 	int reached_end = 0;
 	char c;
 	int i;
-	char cmd_w_env[CMD_MAX_LEN];
-
-	env_find_replace(cmd_w_env, cmd);
 	
   // This is horrible, I know. Breaks when reached_end is true
 	for (i = 0; i < ARG_MAX_LEN; i++) {
-		c = cmd_w_env[i];
+		c = cmd[i];
 
 		if (c == '\0' || c == '\n')	
 			reached_end = 1;	/* Need to finish parsing arg */
@@ -222,6 +222,11 @@ int parse(CmdFunc *func, char argv[ARG_MAX][ARG_MAX_LEN], int *argc, char *cmd)
 	*argc = arg;
 
 	return PARSE_OK;
+}
+
+void source_file(Shell *shelly, char *filepath)
+{
+	
 }
 
 void env_find_replace(char *dest, char *str)
@@ -293,7 +298,7 @@ const char* get_random_greeting() {
 	return greetings[rand() % len];	
 }
 
-void init_shell(Shell *shelly, int is_subshell) {
+void init_shell(Shell *shelly, int is_interactive) {
 	char *hist_filepath = (char *) malloc(sizeof(char) * ARG_MAX_LEN);
 	FILE *hist_file;
 	shelly->hist_len = 0;
@@ -311,10 +316,18 @@ void init_shell(Shell *shelly, int is_subshell) {
 	shelly->cwd = getcwd(NULL, 0);
 	shelly->is_running = 1;
 
-	if (is_subshell) {
+	if (is_interactive) {
 		root_shell = shelly;
 		signal(SIGTERM, termination_handler);
 		signal(SIGINT, SIG_IGN);
+	}
+
+	char *prompt = getenv("PROMP");
+	if (prompt) {
+		shelly->prompt = prompt;
+	}
+	else {
+		shelly->prompt = DEFAULT_PROMPT;
 	}
 }
 
@@ -322,62 +335,16 @@ void exit_shell(Shell *shelly)
 {
   free(shelly->cwd);
   free(shelly->hist_filepath);
+
+	CmdHist *hist = shelly->hist, *temp;
+	while (hist != NULL) {
+		temp = hist->next;
+		free(hist);
+		hist = temp;
+	}
 }
   
   
-// Change directory builtin
-// void movetodir(char* parsed, Shell* shelly)
-// {
-//   struct dirent *dp;
-//   char parsedDir[100] = "/";
-//   char newDir[100];
-//   DIR* dir;
-//   
-//   // If navigate up
-//   if (!strcmp(parsed,".."))
-//   {
-//       strcpy(newDir, shelly->cwd);
-//       int removeLen = 0;
-//       for (int i = strlen(shelly->cwd); i > 0; i--)
-//       {
-//         if (newDir[i] == '/')
-//           break;
-//         
-//         removeLen++;
-//       }
-//       newDir[strlen(shelly->cwd)-removeLen] = '\0';
-//       dir = opendir(newDir);
-//   }
-//   // If navigate down
-//   else {
-//     strcpy(newDir, shelly->cwd);
-//     strcat(parsedDir, parsed);
-//     strcat(newDir, parsedDir);
-//     dir = opendir(newDir);
-//   }
-//   
-//   
-//   if (dir) {
-//     // Directory Exists
-//     dp = readdir(dir);
-//     
-//     strcpy(shelly->cwd, newDir);
-//     printf("    changed directory: %s\n", shelly->cwd);
-//     
-//     closedir(dir);
-//   } else if (ENOENT == errno) {
-//     // Directory does not exist.
-//     printf("  Does not exist");
-//   } else {
-//     // opendir() failed for some other reason.
-//     printf("  What");
-//   }
-//
-//   
-//   return;
-//     
-// }
-
 // Must be null terminated
 CmdHist* create_cmd_hist(char *cmd)
 {
@@ -428,23 +395,61 @@ void add_to_hist(Shell *shelly, char *buf)
   }
 }
 
+// TODO: if we have time
+// Idea is to create a TabCompl struct that contains ComplSrc structs and a
+// ComplContext struct. The ComplSrc provide the autocomplete options while the
+// ComplContext struct contains the context (like compl for command, directory,
+// etc).
+int tab_complete(char **results, char *buf)
+{
+	return 0;	
+}
+
 // Function to take input
 int take_input(Shell* shelly, char* str)
 {
-	char* buf;
+	char c;
+	int i = 0;
+	char buf[CMD_MAX_LEN];
 	char buf_env[CMD_MAX_LEN];
 
-	buf = readline("\n>>> ");
-	if (strlen(buf) != 0) {
-		add_to_hist(shelly, buf);
-		env_find_replace(buf_env, buf);
-		strcpy(str, buf_env);
+	env_find_replace(buf_env, shelly->prompt);
+	printf("%s", buf_env);
+	while ((c = getchar()) != '\n') {
+		if (c == '\t') {
+	
+		}	
+		else {
+			buf[i] = c;
+			i++;
+		}
 
-		return 0;
-	} 
-	else {
-		return 1;
+		if (i >= CMD_MAX_LEN - 1) {
+			printf("Command too long!\n");
+			return 1;
+		}
 	}
+
+	buf[i] = '\0';
+	
+	if (strlen(buf) == 0)
+		return 1;
+
+	env_find_replace(buf_env, buf);
+	strcpy(str, buf_env);
+	return 0;
+
+	// buf = readline("\n>>> ");
+	// if (strlen(buf) != 0) {
+	// 	add_to_hist(shelly, buf);
+	// 	env_find_replace(buf_env, buf);
+	// 	strcpy(str, buf_env);
+	//
+	// 	return 0;
+	// }
+	// else {
+	// 	return 1;
+	// }
 }
 
 int start(Shell *shell, CmdArgv argv, int argc)
@@ -521,6 +526,7 @@ int movetodir(Shell *shell, CmdArgv argv, int argc)
 	else {
 		char cwd[PATH_MAX];
 		getcwd(cwd, sizeof(cwd));
+		setenv("PWD", cwd, 1);
 		printf("Changed directory to '%s'\n", cwd);
 	}
 	
@@ -687,7 +693,7 @@ int main()
   
   while (shelly.is_running) {
     if (take_input(&shelly, cmd_buf)) {
-      printf("\n");
+      // printf("\n");
     }
     else {
       enum ParseStatus status = parse(&cmd, cmd_argv, &cmd_argc, cmd_buf);
