@@ -21,8 +21,10 @@
 // Clearing the shell using escape sequences
 #define clear() printf("\033[H\033[J")
 #define HIST_FILEPATH "$HOME/.shelly-history"
-#define DEFAULT_PROMPT "$PWD # "
+#define DEFAULT_PROMPT "$PWD# "
 #define ENV_PROMPT "SHELLY_PROMPT"
+#define REPL_ENV_CHAR '{'
+#define REPL_WS_CHAR '\\'
 // Using this for getcwd
 #define ARG_MAX_LEN 1024
 #define ARG_MAX 64
@@ -222,6 +224,10 @@ int parse(const CmdDef **cmd_def, CmdArgv argv, int *argc, char *cmd)
 		}
 		else if (IS_ALLOWED(c)) {
 			parsing_arg = 1;
+			if (c == REPL_ENV_CHAR)
+				c = '$';
+			else if (c == REPL_WS_CHAR)
+				c = ' ';
 			argv[arg][arg_len] = c;
 			arg_len++;
 		}
@@ -311,7 +317,9 @@ void env_find_replace(char *dest, char *str)
 	char c = str[0];
 	int in_key = 0;
 
-	while (c != '\0' && back < ARG_MAX_LEN) {
+	// Need to check if in_key=true and c=='\0' to cover the edge case where the
+	// env var is at the end of the string.
+	while ((c != '\0' || in_key) && back < ARG_MAX_LEN) {
 		if (c == '$')	{
 			in_key = 1;
 			back++;
@@ -476,7 +484,7 @@ void read_hist_file(Shell *shelly, FILE *hist_file)
 			cmd[i++] = c;
 		else if (i > 0) {
 			cmd[i] = '\0';
-      printf("'%s'\n", cmd);
+      // printf("'%s'\n", cmd);
 			read_hist = create_cmd_hist(cmd);
 			read_hist->next = shelly->hist;
 			shelly->hist = read_hist;
@@ -497,7 +505,7 @@ void add_to_hist(Shell *shelly, char *buf)
 	// Write to hist file
   FILE *hist_file = fopen(shelly->hist_filepath, "a");
 	if (hist_file) {
-		fprintf(hist_file, "%s\n", buf);
+		// fprintf(hist_file, "%s\n", buf);
     fclose(hist_file);
   }
 }
@@ -521,6 +529,8 @@ int take_input(Shell* shelly, char* str)
 	char buf[CMD_MAX_LEN];
 	char buf_env[CMD_MAX_LEN];
 
+	// printf("ti: '%s'\n", getenv(ENV_PROMPT));
+	// printf("pwd: '%s'\n", getenv("PWD"));
 	env_find_replace(buf_env, getenv(ENV_PROMPT));
 	printf("%s", buf_env);
 	while ((c = getchar()) != '\n') {
@@ -862,18 +872,19 @@ void termination_handler(int signum)
 
 int set_env(Shell *shell, CmdArgv argv, int argc)
 {
-  if (argc >= 3)
+  if (argc > 3)
     return -1;
 
   char *key = argv[1];
   char *val;
-  if (argc == 3)
+  if (argc == 2)
     val = "";
   else
     val = argv[2];
 
-  printf("key=%s, val=%s\n", key, val);
+  // printf("key=%s, val=%s\n", key, val);
   setenv(key, val, 1);
+	// printf("val is now: '%s'\n", getenv(key));
 
   return 0;
 }
