@@ -22,7 +22,7 @@
 #define clear() printf("\033[H\033[J")
 #define HIST_FILEPATH "$HOME/.shelly-history"
 #define DEFAULT_PROMPT "$PWD # "
-
+#define ENV_PROMPT "SHELLY_PROMPT"
 // Using this for getcwd
 #define ARG_MAX_LEN 1024
 #define ARG_MAX 64
@@ -103,13 +103,15 @@ void exit_shell(Shell *shelly);
 void read_hist_file(Shell *shelly, FILE *hist_file);
 CmdHist* create_cmd_hist(char *cmd);
 void add_to_hist(Shell *shelly, char *buf);
-int parse(CmdFunc *func, char argv[ARG_MAX][ARG_MAX_LEN], int *argc, char *cmd);
+int parse(const CmdDef **cmd_def, CmdArgv argv, int *argc, char *cmd);
 void env_find_replace(char *dest, char *str);
+void print_hist_list(Shell *shelly);
 
 void termination_handler(int signum);
 
 int movetodir(Shell *shelly, CmdArgv argv, int argc);
 int whereami(Shell *shelly, CmdArgv argv, int argc);
+int set_env(Shell *shell, CmdArgv argv, int argc);
 int history(Shell *shelly, CmdArgv argv, int argc);
 void history_rev(CmdHist *hist, int i);
 int byebye(Shell *shelly, CmdArgv argv, int argc);
@@ -127,6 +129,7 @@ int background_help(Shell *shelly, CmdArgv argv, int argc);
 int dalek_help(Shell *shelly, CmdArgv argv, int argc);
 int shell_exit(Shell *shell, CmdArgv argv, int argc);
 int shell_help(Shell *shell, CmdArgv argv, int argc);
+int set_env_help(Shell *shell, CmdArgv argv, int argc);
 
 Shell *root_shell = NULL;
 pid_t shell_pgid;
@@ -135,7 +138,7 @@ int shell_terminal;
 int shell_is_interactive;
 
 
-static const CmdDef builtin_cmds[] = {
+const CmdDef builtin_cmds[] = {
 	{"movetodir", movetodir, movetodir_help},
 	{"whereami", whereami, whereami_help},
 	{"history", history, history_help},
@@ -144,6 +147,7 @@ static const CmdDef builtin_cmds[] = {
 	{"start", start, start_help},
 	{"background", background, background_help},
 	{"dalek", dalek, dalek_help},
+  {"set", set_env, set_env_help},
 	{"exit", shell_exit, NULL},
 	{"help", shell_help, NULL},
 	{NULL, NULL, NULL}
@@ -163,14 +167,14 @@ static const char *greetings[] = {
 	NULL
 };
 
-CmdFunc parse_cmd(char *cmd_name)
+const CmdDef* parse_cmd(char *cmd_name)
 {
 	CmdDef bi_cmd;		
 	int i = 0;
 
 	while ((bi_cmd = builtin_cmds[i]).cmd_name != NULL) {
 		if (strcmp(bi_cmd.cmd_name, cmd_name) == 0)
-			return bi_cmd.func;
+			return builtin_cmds + i;
 
 		i++;
 	}
@@ -179,7 +183,7 @@ CmdFunc parse_cmd(char *cmd_name)
 }
 
 // cmd is a null or \n terminated string
-int parse(CmdFunc *func, CmdArgv argv, int *argc, char *cmd)
+int parse(const CmdDef **cmd_def, CmdArgv argv, int *argc, char *cmd)
 {
 	int arg = 0;
 	int arg_len = 0;
@@ -202,11 +206,11 @@ int parse(CmdFunc *func, CmdArgv argv, int *argc, char *cmd)
 				// printf("parsed argv: '%s'\n", argv[arg]);
 
 				if (arg == 0) {
-					CmdFunc cmd_func = parse_cmd(argv[0]);
-					if (cmd_func == NULL)
+					const CmdDef* cd = parse_cmd(argv[0]);
+					if (cmd_def == NULL)
 						return PARSE_INVALID_CMD;
 
-					*func = cmd_func;
+					*cmd_def = cd;
 				}
 				parsing_arg = 0;
 				arg_len = 0;
@@ -428,12 +432,9 @@ void init_shell(Shell *shelly, int is_interactive) {
   shelly->outfile = STDOUT_FILENO;
   shelly->errfile = STDERR_FILENO;
 
-	char *prompt = getenv("PROMP");
-	if (prompt) {
-		shelly->prompt = prompt;
-	}
-	else {
-		shelly->prompt = DEFAULT_PROMPT;
+	char *prompt = getenv(ENV_PROMPT);
+	if (!prompt) {
+		setenv(ENV_PROMPT, DEFAULT_PROMPT, 1);
 	}
 }
 
@@ -474,8 +475,8 @@ void read_hist_file(Shell *shelly, FILE *hist_file)
 		if (c != '\n' && c != '\r')
 			cmd[i++] = c;
 		else if (i > 0) {
-			cmd[i + 1] = '\0';
-      // printf("'%s'\n", cmd);
+			cmd[i] = '\0';
+      printf("'%s'\n", cmd);
 			read_hist = create_cmd_hist(cmd);
 			read_hist->next = shelly->hist;
 			shelly->hist = read_hist;
@@ -511,6 +512,7 @@ int tab_complete(char **results, char *buf)
 	return 0;	
 }
 
+
 // Function to take input
 int take_input(Shell* shelly, char* str)
 {
@@ -519,7 +521,7 @@ int take_input(Shell* shelly, char* str)
 	char buf[CMD_MAX_LEN];
 	char buf_env[CMD_MAX_LEN];
 
-	env_find_replace(buf_env, shelly->prompt);
+	env_find_replace(buf_env, getenv(ENV_PROMPT));
 	printf("%s", buf_env);
 	while ((c = getchar()) != '\n') {
 		if (c == '\t') {
@@ -542,6 +544,7 @@ int take_input(Shell* shelly, char* str)
 		return 1;
 
 	env_find_replace(buf_env, buf);
+  add_to_hist(shelly, buf);
 	strcpy(str, buf_env);
 	return 0;
 
@@ -619,7 +622,14 @@ int dalek_help(Shell *shell, CmdArgv argv, int argc)
 // Returns NULL at the end of the path
 char* get_next_dir(char *dir, char *path)
 {
+  if (*path == '/') {
+    dir[0] = '/';
+    dir[1] = '\0'; 
+    return path + 1;
+  }
+
 	while (*path != '/') {
+    putc(*path, stdin);
 		*dir = *path;
 
 		if (*path == '\0')
@@ -629,6 +639,8 @@ char* get_next_dir(char *dir, char *path)
 		dir++;
 	}
 
+  *dir = '\0';
+
 	// Move until next non-'/' to supports paths like
 	// /dev///whoops/too//many//slashes
 	while (*path == '/')
@@ -637,23 +649,65 @@ char* get_next_dir(char *dir, char *path)
 	return path;
 }
 
-int movetodir(Shell *shell, CmdArgv argv, int argc)
+int movetodir(Shell *shelly, CmdArgv argv, int argc)
 {
 	if (argc != 2)
 		return 1;
 	
 	char *path = argv[1];
 	char dirname[CMD_MAX_LEN];
+  
+  // while ((path = get_next_dir(dirname, path)) != NULL)
+  //   printf("%s\n", dirname);
+  // printf("%s\n", dirname);
 
-	if (chdir(path) != 0) {
-		printf("The directory '%s' does not exist!\n", path);
+  struct dirent *dp;
+	char parsedDir[100] = "/";
+	char newDir[100];
+	DIR* dir;
+	
+	// If navigate up
+	if (!strcmp(path,".."))
+	{
+    strcpy(newDir, shelly->cwd);
+    int removeLen = 0;
+    for (int i = strlen(shelly->cwd); i > 0; i--)
+    {
+      if (newDir[i] == '/')
+        break;
+      
+      removeLen++;
+    }
+    newDir[strlen(shelly->cwd)-removeLen] = '\0';
+    dir = opendir(newDir);
 	}
+	// If navigate down
 	else {
-		char cwd[PATH_MAX];
-		getcwd(cwd, sizeof(cwd));
-		setenv("PWD", cwd, 1);
-		printf("Changed directory to '%s'\n", cwd);
+		strcpy(newDir, shelly->cwd);
+		strcat(parsedDir, path);
+		strcat(newDir, parsedDir);
+		dir = opendir(newDir);
 	}
+	
+	
+	if (dir) {
+		// Directory Exists
+		dp = readdir(dir);
+    fchdir(dirfd(dir));
+		
+		strcpy(shelly->cwd, newDir);
+    setenv("PWD", shelly->cwd, 1);
+		printf("    changed directory: %s\n", shelly->cwd);
+		
+		closedir(dir);
+	} else if (ENOENT == errno) {
+		// Directory does not exist.
+		printf("	Does not exist");
+	} else {
+		// opendir() failed for some other reason.
+		printf("	What");
+	}
+
 	
 	return 0;	
 }
@@ -680,6 +734,7 @@ int whereami_help(Shell *shell, CmdArgv argv, int argc)
 
 int history(Shell *shell, CmdArgv argv, int argc)
 {
+  void print_hist_list(Shell *shelly);
 	history_rev(shell->hist, 0);
 
 	return 0;	
@@ -720,11 +775,13 @@ int replay(Shell *shell, CmdArgv argv, int argc)
 	}
 
 	int replay_num = strtol(argv[1], NULL, 10);
-	int i = replay_num;
+  // Need to add one because the cmd string that called this function is now in
+  // history
+	int i = replay_num + 1;
 	CmdHist *hist = shell->hist;
 	CmdArgv replay_argv;
 	int replay_argc;
-	CmdFunc replay_func;
+	const CmdDef *replay_cmd;
 	const int max_recursive_replay = 16;
 	static int recursive_relay_count = 0;
 
@@ -745,14 +802,14 @@ int replay(Shell *shell, CmdArgv argv, int argc)
 	}
 
 	printf("Running '%s'\n", hist->cmd);
-	int parse_result = parse(&replay_func, replay_argv, &replay_argc, hist->cmd);	
+	int parse_result = parse(&replay_cmd, replay_argv, &replay_argc, hist->cmd);	
 	if (!parse_result) {
-		if (replay_func == replay) 
+		if (replay_cmd->func == replay) 
 			recursive_relay_count++;
 
-		replay_func(shell, replay_argv, replay_argc);	
+		replay_cmd->func(shell, replay_argv, replay_argc);	
 
-		if (replay_func == replay) 
+		if (replay_cmd->func == replay) 
 			recursive_relay_count--;
 	}
 	else {
@@ -803,6 +860,30 @@ void termination_handler(int signum)
 	exit_shell(root_shell);	
 }
 
+int set_env(Shell *shell, CmdArgv argv, int argc)
+{
+  if (argc >= 3)
+    return -1;
+
+  char *key = argv[1];
+  char *val;
+  if (argc == 3)
+    val = "";
+  else
+    val = argv[2];
+
+  printf("key=%s, val=%s\n", key, val);
+  setenv(key, val, 1);
+
+  return 0;
+}
+
+int set_env_help(Shell *shell, CmdArgv argv, int argc)
+{
+  printf("set <key> <value>             sets environment variable\n");	
+  return 0;
+}
+
 int main()
 {
 	Shell shelly;
@@ -810,7 +891,7 @@ int main()
   // This will be dynamically allocated later...maybe
   char cmd_argv[ARG_MAX][ARG_MAX_LEN];
 	int cmd_argc = 0;
-  CmdFunc cmd;
+  const CmdDef *cmd_def;
 
 	init_shell(&shelly, 1);
 	printf("%s\n", get_random_greeting());
@@ -821,10 +902,14 @@ int main()
       // printf("\n");
     }
     else {
-      enum ParseStatus status = parse(&cmd, cmd_argv, &cmd_argc, cmd_buf);
+      enum ParseStatus status = parse(&cmd_def, cmd_argv, &cmd_argc, cmd_buf);
       switch(status) {
         case PARSE_OK:
-          cmd(&shelly, cmd_argv, cmd_argc);
+          if(cmd_def->func(&shelly, cmd_argv, cmd_argc) != 0) {
+            printf("Usage:\n");
+            cmd_def->help(&shelly, cmd_argv, cmd_argc);
+          }
+
           break;
         case PARSE_INVALID_CHAR:
         case PARSE_INVALID_CMD:
