@@ -1,10 +1,12 @@
 #include <stdio.h>
+#include <fcntl.h>
 #include <ctype.h>
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <math.h>
 #include <signal.h>
+#include <termios.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <readline/readline.h>
@@ -80,9 +82,9 @@ struct Shell
   char *cwd; // Current directory path
   // char mainDir[ARG_MAX_LEN];
   
+  int infile, outfile, errfile;
 	int bgpids[MAX_BG_JOBS];
 	int num_bgpids;
-
 	int is_running;
 
 	char *prompt;
@@ -127,6 +129,11 @@ int shell_exit(Shell *shell, CmdArgv argv, int argc);
 int shell_help(Shell *shell, CmdArgv argv, int argc);
 
 Shell *root_shell = NULL;
+pid_t shell_pgid;
+struct termios shell_tmodes;
+int shell_terminal;
+int shell_is_interactive;
+
 
 static const CmdDef builtin_cmds[] = {
 	{"movetodir", movetodir, movetodir_help},
@@ -172,7 +179,7 @@ CmdFunc parse_cmd(char *cmd_name)
 }
 
 // cmd is a null or \n terminated string
-int parse(CmdFunc *func, char argv[ARG_MAX][ARG_MAX_LEN], int *argc, char *cmd)
+int parse(CmdFunc *func, CmdArgv argv, int *argc, char *cmd)
 {
 	int arg = 0;
 	int arg_len = 0;
@@ -227,6 +234,68 @@ int parse(CmdFunc *func, char argv[ARG_MAX][ARG_MAX_LEN], int *argc, char *cmd)
 void source_file(Shell *shelly, char *filepath)
 {
 	
+}
+
+int launch_process(CmdArgv argv, int argc, 
+  int pgid, int infile, int outfile, int errfile, int foreground)
+{
+  char **process_args = (char **) malloc(sizeof(char *) * (argc + 1)); 
+  int i;
+  for (i = 0; i < argc - 1; i++) {
+    process_args[i] = argv[i + 1];
+  }
+  process_args[i] = NULL;
+
+  // Forking a child
+  pid_t pid = fork(); 
+
+  if (pid == -1) {
+    printf("\nFailed forking child..");
+    return -1;
+  } else if (pid == 0) {
+    pid = getpid ();
+    if (pgid == 0) pgid = pid;
+      setpgid (pid, pgid);
+
+    if (infile != STDIN_FILENO) {
+      dup2(infile, STDIN_FILENO);
+      close(infile);
+    }
+    if (outfile != STDOUT_FILENO) {
+      dup2(outfile, STDOUT_FILENO);
+      close(outfile);
+    }
+    if (infile != STDERR_FILENO) {
+      dup2(errfile, STDERR_FILENO);
+      close(errfile);
+    }
+
+    if (execvp(process_args[0], process_args) < 0) {
+      switch (errno) {
+        case EACCES:
+          printf("Access denied.\n");
+          break;
+        case EIO:
+          printf("An I/O error has occured.\n");
+          break;
+        case ENOENT:
+          printf("Does not exist.\n");
+          break;
+        default:
+          printf("An error has occured (%d)\n", errno);
+          break;
+      }
+    }
+    exit(1);
+  } else {
+    // waiting for child to terminate
+    if (foreground) {
+      wait(NULL); 
+      return 0;
+    }
+
+    return pid;
+  }
 }
 
 void env_find_replace(char *dest, char *str)
@@ -316,11 +385,48 @@ void init_shell(Shell *shelly, int is_interactive) {
 	shelly->cwd = getcwd(NULL, 0);
 	shelly->is_running = 1;
 
-	if (is_interactive) {
+	// if (is_interactive) {
+	// 	root_shell = shelly;
+	// 	signal(SIGTERM, termination_handler);
+	// 	signal(SIGINT, SIG_IGN);
+	// }
+
+  /* See if we are running interactively.  */
+  shell_terminal = STDIN_FILENO;
+  shell_is_interactive = isatty (shell_terminal);
+
+  if (shell_is_interactive) {
 		root_shell = shelly;
-		signal(SIGTERM, termination_handler);
-		signal(SIGINT, SIG_IGN);
-	}
+    /* Loop until we are in the foreground.  */
+    while (tcgetpgrp (shell_terminal) != (shell_pgid = getpgrp ()))
+      kill (- shell_pgid, SIGTTIN);
+
+    /* Ignore interactive and job-control signals.  */
+    signal (SIGINT, SIG_IGN);
+    signal (SIGQUIT, SIG_IGN);
+    signal (SIGTSTP, SIG_IGN);
+    signal (SIGTTIN, SIG_IGN);
+    signal (SIGTTOU, SIG_IGN);
+    signal (SIGCHLD, SIG_IGN);
+
+    /* Put ourselves in our own process group.  */
+    shell_pgid = getpid ();
+    if (setpgid (shell_pgid, shell_pgid) < 0)
+      {
+        perror ("Couldn't put the shell in its own process group");
+        exit (1);
+      }
+
+    /* Grab control of the terminal.  */
+    tcsetpgrp (shell_terminal, shell_pgid);
+
+    /* Save default terminal attributes for shell.  */
+    tcgetattr (shell_terminal, &shell_tmodes);
+  }
+
+  shelly->infile = STDIN_FILENO;
+  shelly->outfile = STDOUT_FILENO;
+  shelly->errfile = STDERR_FILENO;
 
 	char *prompt = getenv("PROMP");
 	if (prompt) {
@@ -454,7 +560,7 @@ int take_input(Shell* shelly, char* str)
 
 int start(Shell *shell, CmdArgv argv, int argc)
 {
-  printf("start\n");	
+  launch_process(argv, argc, shell_pgid, shell->infile, shell->outfile, shell->errfile, 1);
 	return 0;
 }
 
@@ -467,7 +573,9 @@ int start_help(Shell *shell, CmdArgv argv, int argc)
 
 int background(Shell *shell, CmdArgv argv, int argc)
 {
-  printf("background\n");	
+  int dev_null = open("/dev/null", O_WRONLY);
+  printf("%d\n", 
+    launch_process(argv, argc, shell_pgid, -1, dev_null, dev_null, 0));
 	return 0;
 }
 
@@ -480,7 +588,24 @@ int background_help(Shell *shell, CmdArgv argv, int argc)
 
 int dalek(Shell *shell, CmdArgv argv, int argc)
 {
-  printf("dalek\n");	
+  if (argc != 2)
+    return 1;
+
+  int pid = strtol(argv[1], NULL, 10);
+
+  // Check if the pid exists
+  kill(pid, 0);
+  if (errno == ESRCH) {
+    printf("The process with pid %d does not exist.\n", pid);
+  }
+  else {
+    // No mercy
+    kill(pid, SIGKILL);
+    if (errno == EPERM)
+      printf("Permission denied.\n");
+    else
+      printf("Killed %d\n", pid);
+  }
 	return 0;
 }
 
