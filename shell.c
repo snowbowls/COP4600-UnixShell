@@ -209,7 +209,7 @@ int parse(const CmdDef **cmd_def, CmdArgv argv, int *argc, char *cmd)
 
 				if (arg == 0) {
 					const CmdDef* cd = parse_cmd(argv[0]);
-					if (cmd_def == NULL)
+					if (cd == NULL)
 						return PARSE_INVALID_CMD;
 
 					*cmd_def = cd;
@@ -712,10 +712,10 @@ int movetodir(Shell *shelly, CmdArgv argv, int argc)
 		closedir(dir);
 	} else if (ENOENT == errno) {
 		// Directory does not exist.
-		printf("	Does not exist");
+		printf("	Does not exist\n");
 	} else {
 		// opendir() failed for some other reason.
-		printf("	What");
+		printf("	What\n");
 	}
 
 	
@@ -914,6 +914,7 @@ int main()
     }
     else {
       enum ParseStatus status = parse(&cmd_def, cmd_argv, &cmd_argc, cmd_buf);
+			// printf("parse status: %d, cmd_def: %p\n", status, cmd_def);
       switch(status) {
         case PARSE_OK:
           if(cmd_def->func(&shelly, cmd_argv, cmd_argc) != 0) {
