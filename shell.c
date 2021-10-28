@@ -110,6 +110,7 @@ void env_find_replace(char *dest, char *str);
 void print_hist_list(Shell *shelly);
 
 void termination_handler(int signum);
+void child_term_handler(int signum);
 
 int movetodir(Shell *shelly, CmdArgv argv, int argc);
 int whereami(Shell *shelly, CmdArgv argv, int argc);
@@ -413,12 +414,12 @@ void init_shell(Shell *shelly, int is_interactive) {
       kill (- shell_pgid, SIGTTIN);
 
     /* Ignore interactive and job-control signals.  */
-    signal (SIGINT, SIG_IGN);
-    signal (SIGQUIT, SIG_IGN);
-    signal (SIGTSTP, SIG_IGN);
-    signal (SIGTTIN, SIG_IGN);
-    signal (SIGTTOU, SIG_IGN);
-    signal (SIGCHLD, SIG_IGN);
+    signal(SIGINT, SIG_IGN);
+    signal(SIGQUIT, SIG_IGN);
+    signal(SIGTSTP, SIG_IGN);
+    signal(SIGTTIN, SIG_IGN);
+    signal(SIGTTOU, SIG_IGN);
+    signal(SIGCHLD, child_term_handler);
 
     /* Put ourselves in our own process group.  */
     shell_pgid = getpid ();
@@ -915,6 +916,27 @@ void print_hist_list(Shell *shelly)
     hist = hist->next;
   }
   printf("End of history.\n");
+}
+
+void child_term_handler(int signum)
+{
+	// https://www.gnu.org/software/libc/manual/html_mono/libc.html#Process-Completion
+	int pid, status, serrno;
+  serrno = errno;
+  while (1)
+    {
+      pid = waitpid (WAIT_MYPGRP, &status, WNOHANG);
+      if (pid < 0)
+        {
+          // perror ("waitpid");
+          break;
+        }
+      if (pid == 0)
+        break;
+			
+			printf("\n    %d done\n", pid);
+    }
+  errno = serrno;
 }
 
 void termination_handler(int signum)
