@@ -1,3 +1,17 @@
+/*
+*
+*	Assignment 2
+*
+* MyShell (or Shelly)
+* 
+* Authors: Paul Wood
+*					 James <last name>
+*
+* BUILD INSTRUCTIONS:
+*		gcc -lreadline -pthread -lpthread -o shelly shell.c
+*
+* */
+
 #include <stdio.h>
 #include <fcntl.h>
 #include <ctype.h>
