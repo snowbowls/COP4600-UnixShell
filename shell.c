@@ -299,12 +299,15 @@ int launch_process(CmdArgv argv, int argc,
     exit(1);
   } else {
     // waiting for child to terminate
-    if (foreground) {
-      wait(NULL); 
-      return 0;
-    }
-
-    return pid;
+		if (foreground) {
+			wait(NULL); 
+			free(process_args);
+			return 0;
+		}
+		else {
+			free(process_args);
+			return pid;
+		}
   }
 }
 

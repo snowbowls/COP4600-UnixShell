@@ -4,7 +4,6 @@ build:
 run: build
 	./shelly
 
-
 debug:
 	gcc -g -lreadline -o shelly shell.c
 
