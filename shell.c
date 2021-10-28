@@ -9,6 +9,7 @@
 #include <termios.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <threads.h>
 #include <readline/readline.h>
 #include <readline/history.h>
 
@@ -76,6 +77,12 @@ struct CmdHist {
   // CmdArgv vargs;
 };
 
+typedef struct IntList IntList;
+struct IntList {
+	int data;
+	IntList *next;
+};
+
 struct Shell
 {
 	CmdHist *hist;
@@ -85,7 +92,8 @@ struct Shell
   // char mainDir[ARG_MAX_LEN];
   
   int infile, outfile, errfile;
-	int bgpids[MAX_BG_JOBS];
+	IntList *bgpids;
+	mtx_t bg_mtx;
 	int num_bgpids;
 	int is_running;
 
@@ -97,6 +105,7 @@ typedef struct CmdDef {
 	CmdFunc func;
 	CmdFunc help;
 } CmdDef;
+
 
 enum ParseStatus {PARSE_OK=0, PARSE_INVALID_CHAR=1, PARSE_INVALID_CMD=2};
 
@@ -111,7 +120,14 @@ void print_hist_list(Shell *shelly);
 
 void termination_handler(int signum);
 void child_term_handler(int signum);
+void add_bgpid(Shell *shelly, int pid);
+void remove_bgpid(Shell *shelly, int pid);
+void kill_child(int pid);
 
+int print_bgpids(Shell *shelly, CmdArgv argv, int argc);
+int print_bgpids_help(Shell *shelly, CmdArgv argv, int argc);
+
+int dalekall(Shell *shell, CmdArgv argv, int argc);
 int movetodir(Shell *shelly, CmdArgv argv, int argc);
 int whereami(Shell *shelly, CmdArgv argv, int argc);
 int set_env(Shell *shell, CmdArgv argv, int argc);
@@ -135,6 +151,7 @@ int shell_exit(Shell *shell, CmdArgv argv, int argc);
 int shell_help(Shell *shell, CmdArgv argv, int argc);
 int set_env_help(Shell *shell, CmdArgv argv, int argc);
 int repeat_help(Shell *shelly, CmdArgv argv, int argc);
+int dalekall_help(Shell *shell, CmdArgv argv, int argc);
 
 Shell *root_shell = NULL;
 pid_t shell_pgid;
@@ -143,6 +160,7 @@ int shell_terminal;
 int shell_is_interactive;
 
 
+// Literally just realized that the help function can just be a string... GUH
 const CmdDef builtin_cmds[] = {
 	{"movetodir", movetodir, movetodir_help},
 	{"whereami", whereami, whereami_help},
@@ -153,8 +171,12 @@ const CmdDef builtin_cmds[] = {
 	{"background", background, background_help},
 	{"repeat", repeat, repeat_help},
 	{"dalek", dalek, dalek_help},
+	{"dalekall", dalekall, dalekall_help},
+	{"kill", dalek, NULL},
+	{"killall", dalekall, NULL},
   {"set", set_env, set_env_help},
 	{"exit", shell_exit, NULL},
+	{"lsbg", print_bgpids, print_bgpids_help},
 	{"help", shell_help, NULL},
 	{NULL, NULL, NULL}
 };
@@ -396,6 +418,12 @@ void init_shell(Shell *shelly, int is_interactive) {
 
 	shelly->cwd = getcwd(NULL, 0);
 	shelly->is_running = 1;
+	shelly->bgpids = NULL;
+	shelly->num_bgpids = 0;
+	if (mtx_init(&(shelly->bg_mtx), mtx_plain) != thrd_success) {
+		printf("Unable to create mutex for bg job list!\n");
+		exit(1);
+	}
 
 	// if (is_interactive) {
 	// 	root_shell = shelly;
@@ -456,6 +484,15 @@ void exit_shell(Shell *shelly)
 		temp = hist->next;
 		free(hist);
 		hist = temp;
+	}
+
+	IntList *bgpid = shelly->bgpids, *temp_bgpid;
+
+	// Just let the children finish I guess 
+	while (bgpid != NULL) {
+		temp_bgpid = bgpid->next;
+		free(bgpid);
+		bgpid = temp_bgpid;
 	}
 }
   
@@ -601,7 +638,7 @@ int repeat(Shell *shell, CmdArgv argv, int argc)
 
 int repeat_help(Shell *shell, CmdArgv argv, int argc)
 {
-	printf("repeat <n> <command>          repeat <command> <n> times\n");
+	printf("repeat <n> <command>         repeat <command> <n> times\n");
 	return 0;
 }
 
@@ -633,6 +670,7 @@ int start_help(Shell *shell, CmdArgv argv, int argc)
 int background(Shell *shell, CmdArgv argv, int argc)
 {
   int dev_null = open("/dev/null", O_WRONLY);
+	int pid;
 
   char **process_args = (char **) malloc(sizeof(char *) * (argc + 1)); 
   int i;
@@ -641,9 +679,20 @@ int background(Shell *shell, CmdArgv argv, int argc)
   }
   process_args[i] = NULL;
 
-  printf(
-		"%d\n", 
-    launch_process(process_args, argc, shell_pgid, -1, dev_null, dev_null, 0));
+ if (mtx_lock(&shell->bg_mtx) != thrd_success) {
+		printf("Unable to get lock on bg job list!\n");
+		exit(1);
+	}
+
+	pid = launch_process(
+		process_args, argc, shell_pgid, -1, dev_null, dev_null, 0
+	);
+
+	add_bgpid(shell, pid);
+	mtx_unlock(&shell->bg_mtx);
+
+  printf("printing to /dev/null :)\n%d\n", pid);
+
 	free(process_args);
 	return 0;
 }
@@ -654,14 +703,8 @@ int background_help(Shell *shell, CmdArgv argv, int argc)
 	return 0;
 }
 
-
-int dalek(Shell *shell, CmdArgv argv, int argc)
+void kill_child(int pid)
 {
-  if (argc != 2)
-    return 1;
-
-  int pid = strtol(argv[1], NULL, 10);
-
   // Check if the pid exists
   kill(pid, 0);
   if (errno == ESRCH) {
@@ -675,6 +718,40 @@ int dalek(Shell *shell, CmdArgv argv, int argc)
     else
       printf("Killed %d\n", pid);
   }
+}
+
+
+int dalekall(Shell *shell, CmdArgv argv, int argc)
+{
+	IntList *cur = shell->bgpids, *temp;
+	mtx_lock(&shell->bg_mtx);
+	while (cur != NULL) {
+		kill_child(cur->data);
+		temp = cur;
+		cur = cur->next;
+		free(temp);
+	}
+
+	mtx_unlock(&shell->bg_mtx);
+	shell->bgpids = NULL;
+
+	return 0;
+}
+
+int dalekall_help(Shell *shell, CmdArgv argv, int argc)
+{
+	printf("dalekall                     execute order 66\n");
+	return 0;
+}
+
+int dalek(Shell *shell, CmdArgv argv, int argc)
+{
+  if (argc != 2)
+    return 1;
+
+  int pid = strtol(argv[1], NULL, 10);
+	kill_child(pid);
+
 	return 0;
 }
 
@@ -918,24 +995,79 @@ void print_hist_list(Shell *shelly)
   printf("End of history.\n");
 }
 
+int print_bgpids_help(Shell *shelly, CmdArgv argv, int argc)
+{
+	printf("lsbg                         print current background pids\n");
+	return 0;
+}
+
+int print_bgpids(Shell *shelly, CmdArgv argv, int argc)
+{
+	IntList *cur = shelly->bgpids;
+	while (cur != NULL) {
+		printf("%d\n", cur->data);
+		cur = cur->next;
+	}
+
+	return 0;
+}
+
+void add_bgpid(Shell *shelly, int pid)
+{
+	IntList *old = shelly->bgpids;
+	IntList *new = (IntList *) malloc(sizeof(IntList));
+	new->next = old;
+	new->data = pid;
+	shelly->bgpids = new;
+}
+
+void remove_bgpid(Shell *shelly, int pid)
+{
+	IntList *temp, *prev = NULL;
+	temp = shelly->bgpids;
+
+	while (temp != NULL && temp->data != pid) {
+		prev = temp;
+		temp = temp->next;
+	}
+
+	// Will not be NULL if stopped before end of the list
+	if (temp != NULL) {
+		if (prev == NULL) {
+			// Is the head
+			temp = temp->next;
+			free(shelly->bgpids);
+			shelly->bgpids = temp;
+		}	
+		else {
+			prev->next = temp->next;
+			free(temp);
+		}
+	}
+}
+
 void child_term_handler(int signum)
 {
 	// https://www.gnu.org/software/libc/manual/html_mono/libc.html#Process-Completion
 	int pid, status, serrno;
   serrno = errno;
-  while (1)
-    {
-      pid = waitpid (WAIT_MYPGRP, &status, WNOHANG);
-      if (pid < 0)
-        {
-          // perror ("waitpid");
-          break;
-        }
-      if (pid == 0)
-        break;
-			
-			printf("\n    %d done\n", pid);
-    }
+	
+	mtx_lock(&root_shell->bg_mtx);
+
+  while (1) {
+		pid = waitpid (WAIT_MYPGRP, &status, WNOHANG);
+		if (pid < 0)
+			{
+				// perror ("waitpid");
+				break;
+			}
+		if (pid == 0)
+			break;
+		
+		remove_bgpid(root_shell, pid);
+		printf("\n    %d done\n", pid);
+	}
+	mtx_unlock(&root_shell->bg_mtx);
   errno = serrno;
 }
 
@@ -968,7 +1100,7 @@ int set_env(Shell *shell, CmdArgv argv, int argc)
 
 int set_env_help(Shell *shell, CmdArgv argv, int argc)
 {
-  printf("set <key> <value>             sets environment variable\n");	
+  printf("set <key> <value>            sets environment variable\n");	
   return 0;
 }
 
