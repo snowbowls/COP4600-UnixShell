@@ -117,6 +117,7 @@ void add_to_hist(Shell *shelly, char *buf);
 int parse(const CmdDef **cmd_def, CmdArgv argv, int *argc, char *cmd);
 void env_find_replace(char *dest, char *str);
 void print_hist_list(Shell *shelly);
+void free_hist_ll(Shell *shelly);
 
 void termination_handler(int signum);
 void child_term_handler(int signum);
@@ -474,17 +475,24 @@ void init_shell(Shell *shelly, int is_interactive) {
 	}
 }
 
-void exit_shell(Shell *shelly)
+void free_hist_ll(Shell *shelly)
 {
-  free(shelly->cwd);
-  free(shelly->hist_filepath);
-
 	CmdHist *hist = shelly->hist, *temp;
 	while (hist != NULL) {
 		temp = hist->next;
 		free(hist);
 		hist = temp;
 	}
+
+	shelly->hist = NULL;
+}
+
+void exit_shell(Shell *shelly)
+{
+  free(shelly->cwd);
+  free(shelly->hist_filepath);
+
+	free_hist_ll(shelly);
 
 	IntList *bgpid = shelly->bgpids, *temp_bgpid;
 
@@ -540,9 +548,9 @@ void add_to_hist(Shell *shelly, char *buf)
 	shelly->hist_len++;
 
 	// Write to hist file
-  FILE *hist_file = fopen(shelly->hist_filepath, "a");
+  FILE *hist_file = fopen(shelly->hist_filepath, "a+");
 	if (hist_file) {
-		// fprintf(hist_file, "%s\n", buf);
+		fprintf(hist_file, "%s\n", buf);
     fclose(hist_file);
   }
 }
@@ -877,8 +885,20 @@ int whereami_help(Shell *shell, CmdArgv argv, int argc)
 
 int history(Shell *shell, CmdArgv argv, int argc)
 {
-  void print_hist_list(Shell *shelly);
-	history_rev(shell->hist, 0);
+	if (argc > 2)
+		return 1;
+	else if (argc == 2) {
+		if (strcmp(argv[1], "-c") != 0)	
+			return 1;
+		else {
+			remove(shell->hist_filepath);	
+			free_hist_ll(shell);
+		}
+	}
+	else {
+		void print_hist_list(Shell *shelly);
+		history_rev(shell->hist, 0);
+	}
 
 	return 0;	
 }
