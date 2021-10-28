@@ -118,6 +118,7 @@ int history(Shell *shelly, CmdArgv argv, int argc);
 void history_rev(CmdHist *hist, int i);
 int byebye(Shell *shelly, CmdArgv argv, int argc);
 int replay(Shell *shelly, CmdArgv argv, int argc);
+int repeat(Shell *shelly, CmdArgv argv, int argc);
 int start(Shell *shelly, CmdArgv argv, int argc);
 int background(Shell *shelly, CmdArgv argv, int argc);
 int dalek(Shell *shelly, CmdArgv argv, int argc);
@@ -132,6 +133,7 @@ int dalek_help(Shell *shelly, CmdArgv argv, int argc);
 int shell_exit(Shell *shell, CmdArgv argv, int argc);
 int shell_help(Shell *shell, CmdArgv argv, int argc);
 int set_env_help(Shell *shell, CmdArgv argv, int argc);
+int repeat_help(Shell *shelly, CmdArgv argv, int argc);
 
 Shell *root_shell = NULL;
 pid_t shell_pgid;
@@ -148,6 +150,7 @@ const CmdDef builtin_cmds[] = {
 	{"replay", replay, replay_help},
 	{"start", start, start_help},
 	{"background", background, background_help},
+	{"repeat", repeat, repeat_help},
 	{"dalek", dalek, dalek_help},
   {"set", set_env, set_env_help},
 	{"exit", shell_exit, NULL},
@@ -194,7 +197,6 @@ int parse(const CmdDef **cmd_def, CmdArgv argv, int *argc, char *cmd)
 	char c;
 	int i;
 	
-  // This is horrible, I know. Breaks when reached_end is true
 	for (i = 0; i < ARG_MAX_LEN; i++) {
 		c = cmd[i];
 
@@ -246,15 +248,11 @@ void source_file(Shell *shelly, char *filepath)
 	
 }
 
-int launch_process(CmdArgv argv, int argc, 
+
+
+int launch_process(char **argv, int argc, 
   int pgid, int infile, int outfile, int errfile, int foreground)
 {
-  char **process_args = (char **) malloc(sizeof(char *) * (argc + 1)); 
-  int i;
-  for (i = 0; i < argc - 1; i++) {
-    process_args[i] = argv[i + 1];
-  }
-  process_args[i] = NULL;
 
   // Forking a child
   pid_t pid = fork(); 
@@ -280,7 +278,7 @@ int launch_process(CmdArgv argv, int argc,
       close(errfile);
     }
 
-    if (execvp(process_args[0], process_args) < 0) {
+    if (execvp(argv[0], argv) < 0) {
       switch (errno) {
         case EACCES:
           printf("Access denied.\n");
@@ -301,11 +299,9 @@ int launch_process(CmdArgv argv, int argc,
     // waiting for child to terminate
 		if (foreground) {
 			wait(NULL); 
-			free(process_args);
 			return 0;
 		}
 		else {
-			free(process_args);
 			return pid;
 		}
   }
@@ -574,9 +570,55 @@ int take_input(Shell* shelly, char* str)
 	// }
 }
 
+int repeat(Shell *shell, CmdArgv argv, int argc)
+{
+	if (argc < 3)
+		return 1;
+
+	int repeat_count = strtol(argv[1], NULL, 10);
+
+  char **process_args = (char **) malloc(sizeof(char *) * (argc + 1)); 
+  int i;
+  for (i = 0; i < argc - 1; i++) {
+    process_args[i] = argv[i + 2];
+  }
+  process_args[i] = NULL;
+
+	for (int i = 0; i < repeat_count; i++) {
+		printf(
+		  "pid: %d\n",
+			launch_process(
+				process_args, argc, shell_pgid, shell->infile, 
+				shell->outfile, shell->errfile, 0
+			)
+		);
+	}
+
+	free(process_args);
+	return 0;
+}
+
+int repeat_help(Shell *shell, CmdArgv argv, int argc)
+{
+	printf("repeat <n> <command>          repeat <command> <n> times\n");
+	return 0;
+}
+
 int start(Shell *shell, CmdArgv argv, int argc)
 {
-  launch_process(argv, argc, shell_pgid, shell->infile, shell->outfile, shell->errfile, 1);
+  char **process_args = (char **) malloc(sizeof(char *) * (argc + 1)); 
+  int i;
+  for (i = 0; i < argc - 1; i++) {
+    process_args[i] = argv[i + 1];
+  }
+  process_args[i] = NULL;
+
+  launch_process(
+		process_args, argc, shell_pgid, 
+		shell->infile, shell->outfile, shell->errfile, 1
+	);
+	free(process_args);
+
 	return 0;
 }
 
@@ -590,8 +632,18 @@ int start_help(Shell *shell, CmdArgv argv, int argc)
 int background(Shell *shell, CmdArgv argv, int argc)
 {
   int dev_null = open("/dev/null", O_WRONLY);
-  printf("%d\n", 
-    launch_process(argv, argc, shell_pgid, -1, dev_null, dev_null, 0));
+
+  char **process_args = (char **) malloc(sizeof(char *) * (argc + 1)); 
+  int i;
+  for (i = 0; i < argc - 1; i++) {
+    process_args[i] = argv[i + 1];
+  }
+  process_args[i] = NULL;
+
+  printf(
+		"%d\n", 
+    launch_process(process_args, argc, shell_pgid, -1, dev_null, dev_null, 0));
+	free(process_args);
 	return 0;
 }
 
