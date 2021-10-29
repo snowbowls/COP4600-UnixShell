@@ -110,7 +110,7 @@ Is also aliased to `killall`.
 
 Say I ran `tree /` a bunch of times in the background. I can view a list of all
 of the currently running background jobs with the `lsbg` command. I can then killed 
-them with the `killall` or 'dalekall' command:
+them with the `killall` or `dalekall` command:
 ```sh
 	/home/paulw/repos/COP4600-UnixShell# repeat 5 tree / > trees    
 	pid: 12559
