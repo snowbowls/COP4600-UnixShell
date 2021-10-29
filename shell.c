@@ -100,7 +100,9 @@ typedef struct CmdDef {
 } CmdDef;
 
 
-enum ParseStatus {PARSE_OK=0, PARSE_INVALID_CHAR=1, PARSE_INVALID_CMD=2};
+enum ParseStatus {
+	PARSE_OK=0, PARSE_INVALID_CHAR=1, PARSE_INVALID_CMD=2, 
+	PARSE_INVALID_PIPE, PARSE_INVALID_FILE};
 
 void init_shell(Shell*, int);
 void exit_shell(Shell *shelly);
@@ -148,6 +150,7 @@ int repeat_help(Shell *shelly, CmdArgv argv, int argc);
 int dalekall_help(Shell *shell, CmdArgv argv, int argc);
 
 Shell *root_shell = NULL;
+int pipe_to = -1;
 pid_t shell_pgid;
 struct termios shell_tmodes;
 int shell_terminal;
@@ -210,9 +213,12 @@ int parse(const CmdDef **cmd_def, CmdArgv argv, int *argc, char *cmd)
 	int arg = 0;
 	int arg_len = 0;
 	int parsing_arg = 0;
+	int parsing_fpipe = 0;
+	char filepath[ARG_MAX_LEN];
 	int reached_end = 0;
 	char c;
 	int i;
+	pipe_to = -1;
 	
 	for (i = 0; i < ARG_MAX_LEN; i++) {
 		c = cmd[i];
@@ -220,7 +226,17 @@ int parse(const CmdDef **cmd_def, CmdArgv argv, int *argc, char *cmd)
 		if (c == '\0' || c == '\n')	
 			reached_end = 1;	/* Need to finish parsing arg */
 		
+		if (c == '>') {
+			parsing_fpipe = 1;
+			parsing_arg = 0;
+			// printf("parsing pipe\n");
+			continue;
+		}
+
 		if (IS_WHITESPACE(c) || reached_end) {
+			if (parsing_fpipe && reached_end) 
+				break;
+
 			// Done parsing arg
 			if (parsing_arg) {
 				argv[arg][arg_len] = '\0';
@@ -247,7 +263,10 @@ int parse(const CmdDef **cmd_def, CmdArgv argv, int *argc, char *cmd)
 				c = '$';
 			else if (c == REPL_WS_CHAR)
 				c = ' ';
-			argv[arg][arg_len] = c;
+			if (parsing_fpipe)
+				filepath[arg_len] = c;
+			else 
+				argv[arg][arg_len] = c;
 			arg_len++;
 		}
 		else {
@@ -256,6 +275,19 @@ int parse(const CmdDef **cmd_def, CmdArgv argv, int *argc, char *cmd)
 	}
 
 	*argc = arg;
+	// printf("last arg len: %d\n", arg_len);
+
+	if (parsing_fpipe) {
+		if (arg_len <= 0)
+			return PARSE_INVALID_PIPE;
+		else {
+			filepath[arg_len] = '\0';
+			// printf("filepath: '%s'\n", filepath);
+			pipe_to = open(filepath, O_WRONLY | O_CREAT, S_IRUSR | S_IWUSR);
+			if (pipe_to < 0)
+				return PARSE_INVALID_FILE;
+		}
+	}
 
 	return PARSE_OK;
 }
@@ -615,24 +647,37 @@ int repeat(Shell *shell, CmdArgv argv, int argc)
 		return 1;
 
 	int repeat_count = strtol(argv[1], NULL, 10);
+  int dev_null = open("/dev/null", O_WRONLY);
+	int pid;
+	int infile = dev_null;
+	int outfile = (pipe_to < 0) ? shell->outfile : pipe_to;
+	int errfile = (pipe_to < 0) ? shell->errfile : pipe_to;
 
   char **process_args = (char **) malloc(sizeof(char *) * (argc + 1)); 
   int i;
-  for (i = 0; i < argc - 1; i++) {
+  for (i = 0; i < argc - 2; i++) {
     process_args[i] = argv[i + 2];
+		// printf("proc args[%d]=%s\n", i, process_args[i]);
   }
   process_args[i] = NULL;
 
-	for (int i = 0; i < repeat_count; i++) {
-		printf(
-		  "pid: %d\n",
-			launch_process(
-				process_args, argc, shell_pgid, shell->infile, 
-				shell->outfile, shell->errfile, 0
-			)
+	for (i = 0; i < repeat_count; i++) {
+	 if (mtx_lock(&shell->bg_mtx) != thrd_success) {
+			printf("Unable to get lock on bg job list!\n");
+			exit(1);
+		}
+
+		// printf("outfile: %d\n", outfile);
+		pid = launch_process(
+			process_args, argc, shell_pgid, infile, outfile, errfile, 0
 		);
+
+		add_bgpid(shell, pid);
+		mtx_unlock(&shell->bg_mtx);
+		printf("pid: %d\n", pid);
 	}
 
+	close(dev_null);
 	free(process_args);
 	return 0;
 }
@@ -645,6 +690,9 @@ int repeat_help(Shell *shell, CmdArgv argv, int argc)
 
 int start(Shell *shell, CmdArgv argv, int argc)
 {
+	int infile = shell->infile;
+	int outfile = (pipe_to < 0) ? shell->outfile : pipe_to;
+	int errfile = (pipe_to < 0) ? shell->errfile : pipe_to;
   char **process_args = (char **) malloc(sizeof(char *) * (argc + 1)); 
   int i;
   for (i = 0; i < argc - 1; i++) {
@@ -654,7 +702,7 @@ int start(Shell *shell, CmdArgv argv, int argc)
 
   launch_process(
 		process_args, argc, shell_pgid, 
-		shell->infile, shell->outfile, shell->errfile, 1
+		infile, outfile, errfile, 1
 	);
 	free(process_args);
 
@@ -672,6 +720,9 @@ int background(Shell *shell, CmdArgv argv, int argc)
 {
   int dev_null = open("/dev/null", O_WRONLY);
 	int pid;
+	int infile = dev_null;
+	int outfile = (pipe_to < 0) ? shell->outfile : pipe_to;
+	int errfile = (pipe_to < 0) ? shell->errfile : pipe_to;
 
   char **process_args = (char **) malloc(sizeof(char *) * (argc + 1)); 
   int i;
@@ -685,15 +736,16 @@ int background(Shell *shell, CmdArgv argv, int argc)
 		exit(1);
 	}
 
+	// printf("outfile: %d\n", outfile);
 	pid = launch_process(
-		process_args, argc, shell_pgid, -1, dev_null, dev_null, 0
+		process_args, argc, shell_pgid, infile, outfile, errfile, 0
 	);
 
 	add_bgpid(shell, pid);
 	mtx_unlock(&shell->bg_mtx);
+	printf("pid: %d\n", pid);
 
-  printf("printing to /dev/null :)\n%d\n", pid);
-
+	close(dev_null);
 	free(process_args);
 	return 0;
 }
@@ -1145,11 +1197,20 @@ int main()
           }
 
           break;
+				case PARSE_INVALID_PIPE:
+					printf("Invalid pipe!\n");
+					break;
+				case PARSE_INVALID_FILE:
+					printf("Invalid pipe file!\n");
+					break;
         case PARSE_INVALID_CHAR:
         case PARSE_INVALID_CMD:
           printf("Invalid command!\n");
           break;
       }
+
+			if (pipe_to >= 0)
+				close(pipe_to);
     }
   }
 
