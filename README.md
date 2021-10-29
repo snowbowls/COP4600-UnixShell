@@ -26,6 +26,15 @@ Assignment 2: MyShell (or as we call it, Shelly).
 	lsbg                         print current background pids
 ```
 
+## To make
+```sh
+	make
+```
+Or to run immediately after building:
+```sh
+	make run
+```
+
 ## Additional features
 ### Environment variable expansion
 You can use environment variables in the commands that you run, like:
