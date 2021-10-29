@@ -5,7 +5,7 @@
 * MyShell (or Shelly)
 * 
 * Authors: Paul Wood
-*					 James <last name>
+*		   James Henderson
 *
 * BUILD INSTRUCTIONS:
 *		gcc -lreadline -pthread -lpthread -o shelly shell.c
@@ -54,27 +54,6 @@
 // #define IS_PIPELINE(c) ()
 // #define IS_OPERATOR(c) ()
 // #define IS_UNSUPPORTED(c) ()
-
-// TODO List
-//
-// # movetodir directory  (DONE)
-//    do not use chdir()
-//
-// # whereami (DONE)
-//
-// # history[-c] (DONE)
-//
-// # byebye (DONE)
-//
-// # replay number (BIG OOF)
-//
-// # start program [parameters]
-//
-// # background program [parameters]
-//
-// # dalek PID
-//
-// Extra credit...
 
 typedef struct Shell Shell;
 
@@ -189,7 +168,7 @@ const CmdDef builtin_cmds[] = {
 	{"dalekall", dalekall, dalekall_help},
 	{"kill", dalek, NULL},
 	{"killall", dalekall, NULL},
-  {"set", set_env, set_env_help},
+    {"set", set_env, set_env_help},
 	{"exit", shell_exit, NULL},
 	{"lsbg", print_bgpids, print_bgpids_help},
 	{"help", shell_help, NULL},
