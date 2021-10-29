@@ -1,5 +1,10 @@
 # COP4600-UnixShell
 Assignment 2: MyShell (or as we call it, Shelly).
+       .----.   @   @       
+      / .-"-.`.  \v/      
+      | | '\ \ \_/ )     
+    ,-\ `-.' /.'  /        
+    '---`----'----'
 
 **TOC:**
 1. Usage
